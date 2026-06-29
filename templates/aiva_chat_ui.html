@@ -613,6 +613,130 @@
 </head>
 <body>
 
+<!-- ── Startup Loading Screen ──────────────────────────────────────────────── -->
+<style>
+  #startupOverlay {
+    position: fixed; inset: 0; z-index: 99999;
+    background: #060f1e;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 28px; transition: opacity 0.6s ease;
+  }
+  #startupOverlay.fade-out { opacity: 0; pointer-events: none; }
+  .su-logo {
+    width: 72px; height: 72px; border-radius: 50%;
+    background: linear-gradient(135deg, #07ed41 0%, #00b8d4 100%);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 32px; box-shadow: 0 0 40px rgba(7,237,65,0.3);
+    animation: su-pulse 2s ease-in-out infinite;
+  }
+  @keyframes su-pulse {
+    0%, 100% { transform: scale(1); box-shadow: 0 0 40px rgba(7,237,65,0.3); }
+    50%       { transform: scale(1.08); box-shadow: 0 0 60px rgba(7,237,65,0.5); }
+  }
+  .su-title {
+    font-family: 'Inter', sans-serif; font-size: 22px;
+    font-weight: 700; color: #fff; letter-spacing: 0.5px;
+  }
+  .su-sorry {
+    font-family: 'Inter', sans-serif; font-size: 13.5px;
+    color: #8a9bbf; text-align: center; max-width: 360px;
+    line-height: 1.7; padding: 0 20px;
+  }
+  .su-sorry span { color: #07ed41; font-weight: 600; }
+  .su-bar-wrap {
+    width: 260px; height: 4px;
+    background: rgba(255,255,255,0.07); border-radius: 4px; overflow: hidden;
+  }
+  .su-bar {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, #07ed41, #00b8d4);
+    border-radius: 4px; transition: width 0.4s ease;
+    animation: su-shimmer 1.5s linear infinite;
+  }
+  @keyframes su-shimmer {
+    0%   { filter: brightness(1); }
+    50%  { filter: brightness(1.4); }
+    100% { filter: brightness(1); }
+  }
+  .su-status {
+    font-family: 'Inter', sans-serif; font-size: 11.5px;
+    color: #4a5568; letter-spacing: 0.3px;
+  }
+</style>
+
+<div id="startupOverlay">
+  <div class="su-logo">🤖</div>
+  <div class="su-title">AIVA is waking up…</div>
+  <div class="su-sorry">
+    Sorry for the inconvenience — <span>we're a startup</span>, and our backend
+    needs a moment to load. Please be patient, it'll be ready shortly! 🙏
+  </div>
+  <div class="su-bar-wrap"><div class="su-bar" id="suBar"></div></div>
+  <div class="su-status" id="suStatus">Connecting to backend…</div>
+</div>
+
+<script>
+(function () {
+  const overlay  = document.getElementById('startupOverlay');
+  const bar      = document.getElementById('suBar');
+  const status   = document.getElementById('suStatus');
+  let progress   = 0;
+  let attempts   = 0;
+  const MAX_WAIT = 120; // seconds before giving up
+
+  // Animate the progress bar while waiting
+  const tickBar = setInterval(() => {
+    // Crawl fast at first, slow near 90% to signal "almost there"
+    const increment = progress < 60 ? 1.2 : progress < 85 ? 0.4 : 0.1;
+    progress = Math.min(progress + increment, 92);
+    bar.style.width = progress + '%';
+  }, 500);
+
+  async function ping() {
+    attempts++;
+    const elapsed = attempts * 3;
+
+    if (elapsed <= 10)       status.textContent = 'Connecting to backend…';
+    else if (elapsed <= 30)  status.textContent = 'Starting up servers… (' + elapsed + 's)';
+    else if (elapsed <= 60)  status.textContent = 'Almost there, loading AI models… (' + elapsed + 's)';
+    else                     status.textContent = 'Taking a little longer than usual… (' + elapsed + 's)';
+
+    try {
+      const r = await fetch('/api/health', { cache: 'no-store' });
+      if (r.ok) {
+        const data = await r.json();
+        if (data.initialized) {
+          clearInterval(tickBar);
+          clearInterval(poller);
+          bar.style.width = '100%';
+          status.textContent = 'Ready! Loading your chat…';
+          setTimeout(() => {
+            overlay.classList.add('fade-out');
+            setTimeout(() => overlay.remove(), 650);
+          }, 400);
+          return;
+        }
+        status.textContent = 'Backend up — loading AI models… (' + elapsed + 's)';
+      }
+    } catch (_) {
+      // still waking up — keep polling
+    }
+
+    if (elapsed >= MAX_WAIT) {
+      clearInterval(tickBar);
+      clearInterval(poller);
+      status.textContent = 'Taking unusually long. Refresh if the page seems stuck.';
+      bar.style.background = '#f87171';
+      bar.style.width = '100%';
+    }
+  }
+
+  ping(); // immediate first check
+  const poller = setInterval(ping, 3000); // then every 3 seconds
+})();
+</script>
+
 <div class="shell">
 
   <!-- ── Sidebar ── -->
