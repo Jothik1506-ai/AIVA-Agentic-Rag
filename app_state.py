@@ -107,11 +107,35 @@ def initialize_system():
         if hf_api_key:
             print("🌐 Using HuggingFace Inference API for embeddings (cloud mode)...")
             try:
-                from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
+                from langchain_core.embeddings import Embeddings as _BaseEmb
+                from huggingface_hub import InferenceClient as _IClient
+                import numpy as _np
+
+                class _HFInferenceEmbeddings(_BaseEmb):
+                    """Lightweight HF Inference API embeddings — no torch needed."""
+                    def __init__(self, api_key: str, model: str):
+                        self._client = _IClient(api_key=api_key)
+                        self._model = model
+
+                    def _encode(self, text: str) -> list:
+                        result = self._client.feature_extraction(text, model=self._model)
+                        if hasattr(result, "tolist"):
+                            arr = _np.array(result)
+                            if arr.ndim == 2:
+                                arr = arr.mean(axis=0)
+                            return arr.tolist()
+                        return list(result)
+
+                    def embed_documents(self, texts):
+                        return [self._encode(t) for t in texts]
+
+                    def embed_query(self, text: str):
+                        return self._encode(text)
+
                 embed_model_name = app_config.EMBED_MODEL_OPTIONS[0]
-                embedding_model = HuggingFaceInferenceAPIEmbeddings(
+                embedding_model = _HFInferenceEmbeddings(
                     api_key=hf_api_key,
-                    model_name=embed_model_name,
+                    model=embed_model_name,
                 )
                 print(f"✅ Embedding model (API): {embed_model_name}")
             except Exception as e:

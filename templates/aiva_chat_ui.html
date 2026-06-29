@@ -683,7 +683,7 @@
   const status   = document.getElementById('suStatus');
   let progress   = 0;
   let attempts   = 0;
-  const MAX_WAIT = 120; // seconds before giving up
+  const MAX_WAIT = 300; // seconds before giving up (Render free tier can be slow)
 
   // Animate the progress bar while waiting
   const tickBar = setInterval(() => {
@@ -704,19 +704,21 @@
 
     try {
       const r = await fetch('/api/health', { cache: 'no-store' });
-      if (r.ok) {
-        const data = await r.json();
-        if (data.initialized) {
-          clearInterval(tickBar);
-          clearInterval(poller);
-          bar.style.width = '100%';
-          status.textContent = 'Ready! Loading your chat…';
-          setTimeout(() => {
-            overlay.classList.add('fade-out');
-            setTimeout(() => overlay.remove(), 650);
-          }, 400);
-          return;
-        }
+      const data = await r.json();
+      if (data.initialized) {
+        clearInterval(tickBar);
+        clearInterval(poller);
+        bar.style.width = '100%';
+        status.textContent = 'Ready! Loading your chat…';
+        setTimeout(() => {
+          overlay.classList.add('fade-out');
+          setTimeout(() => overlay.remove(), 650);
+        }, 400);
+        return;
+      }
+      if (data.error && data.error !== 'System is still starting up, please wait…') {
+        status.textContent = '⚠️ ' + data.error.slice(0, 80);
+      } else {
         status.textContent = 'Backend up — loading AI models… (' + elapsed + 's)';
       }
     } catch (_) {
@@ -726,7 +728,7 @@
     if (elapsed >= MAX_WAIT) {
       clearInterval(tickBar);
       clearInterval(poller);
-      status.textContent = 'Taking unusually long. Refresh if the page seems stuck.';
+      status.innerHTML = 'Taking unusually long. <a href="javascript:location.reload()" style="color:#07ed41">Click to refresh</a>';
       bar.style.background = '#f87171';
       bar.style.width = '100%';
     }

@@ -80,14 +80,19 @@ Session(app)
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint that shows system status without requiring login"""
-    from app_state import system_initialized, initialization_error
+    from app_state import system_initialized, initialization_error, get_active_llm
     if system_initialized:
-        return jsonify({'status': 'healthy', 'initialized': True})
+        try:
+            _, backend = get_active_llm()
+        except Exception:
+            backend = "none"
+        return jsonify({'status': 'healthy', 'initialized': True, 'llm_backend': backend})
     else:
+        err = initialization_error or "System is still starting up, please wait…"
         return jsonify({
             'status': 'initializing',
             'initialized': False,
-            'error': initialization_error
+            'error': err
         }), 503
 
 # -------------------------------------------------------
