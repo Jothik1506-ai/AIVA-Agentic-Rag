@@ -132,9 +132,14 @@ def internal_error(error):
     return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
 
 # -------------------------------------------------------
-# System init
+# -------------------------------------------------------
+# System init — runs for both gunicorn (cloud) and direct python app.py (local)
 # -------------------------------------------------------
 from app_state import initialize_system
+
+import threading as _threading
+_init_thread = _threading.Thread(target=initialize_system, daemon=True, name="system-init")
+_init_thread.start()
 
 if __name__ == '__main__':
     import sys
@@ -154,9 +159,8 @@ if __name__ == '__main__':
     # Log where we’re serving embedding assets from
     print(f"📂 EMBEDDINGS_DIR = {embeddings_dir.resolve()}")
 
-    # Initialize background systems
-    print("📄 Initializing system components...")
-    initialize_system()
+    print("📄 System initializing in background thread...")
+    _init_thread.join(timeout=2)  # give it a moment to start
 
     try:
         app.run(host='0.0.0.0', port=9072, debug=False, use_reloader=False, threaded=True)
