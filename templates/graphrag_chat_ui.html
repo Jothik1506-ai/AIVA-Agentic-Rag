@@ -1081,6 +1081,7 @@ let activeNbId     = null;    // null = general mode
 let uploadTargetId = null;    // notebook receiving the next file upload
 let waiting        = false;
 let _pollTimer     = null;
+let deselectedFiles = new Set();
 
 // ─────────────────────────────────────────────
 //  Toast
@@ -1188,6 +1189,8 @@ function makeNbItem(nb) {
 function selectNotebook(id) {
   activeNbId = id;
 
+  deselectedFiles.clear();
+
   // Left panel highlights
   document.getElementById('generalRow').classList.toggle('active', id === null);
   document.querySelectorAll('.nb-item').forEach(el =>
@@ -1257,7 +1260,12 @@ function renderRight() {
     return;
   }
 
-  let html = '';
+  let html = `
+    <div class="rp-controls" style="display:flex; justify-content:space-between; align-items:center; padding: 4px 6px 12px; margin-bottom: 8px; border-bottom:1px solid var(--border); font-size:12px;">
+      <span onclick="selectAllSources()" style="color:#00C070; cursor:pointer; font-weight:500;">✓ Select all</span>
+      <span onclick="clearAllSources()" style="color:var(--danger); cursor:pointer; font-weight:500;">✕ Clear all</span>
+    </div>
+  `;
   if (binfo.spin) {
     html += `<div class="nb-indexing" style="margin-bottom:8px;">
                <div class="spin"></div> Indexing sources — please wait…
@@ -1278,12 +1286,14 @@ function renderRight() {
     const icon   = isFile ? fileIcon(s.value) : '🔗';
     const ext    = isFile ? s.value.split('.').pop().toUpperCase() : 'URL';
     const badge  = `<span class="src-card-badge ${binfo.cls}">${binfo.label}</span>`;
+    const isChecked = !deselectedFiles.has(name) ? 'checked' : '';
 
     html += `
-      <div class="src-card">
+      <div class="src-card" style="display: flex; align-items: center; gap: 8px;">
+        <input type="checkbox" class="src-checkbox" data-name="${esc(name)}" ${isChecked} onchange="toggleFileSelection(this)" style="cursor: pointer; width: 15px; height: 15px; accent-color: #00C070; margin-left: 4px; flex-shrink: 0;">
         <div class="src-card-icon">${icon}</div>
-        <div class="src-card-info">
-          <div class="src-card-name" title="${esc(name)}">${esc(name.length > 28 ? name.slice(0,28)+'…' : name)}</div>
+        <div class="src-card-info" style="flex: 1; min-width: 0;">
+          <div class="src-card-name" title="${esc(name)}">${esc(name.length > 24 ? name.slice(0,24)+'…' : name)}</div>
           <div class="src-card-meta">${ext} &nbsp;${badge}</div>
         </div>
       </div>`;
@@ -1293,6 +1303,30 @@ function renderRight() {
              <span>＋</span> Add more sources
            </button>`;
   body.innerHTML = html;
+}
+
+function selectAllSources() {
+  deselectedFiles.clear();
+  renderRight();
+}
+
+function clearAllSources() {
+  const nb = notebooks.find(n => n.id === activeNbId);
+  if (!nb || !nb.sources) return;
+  nb.sources.forEach(s => {
+    const name = s.type === 'file' ? basename(s.value) : s.value;
+    deselectedFiles.add(name);
+  });
+  renderRight();
+}
+
+function toggleFileSelection(checkbox) {
+  const name = checkbox.dataset.name;
+  if (checkbox.checked) {
+    deselectedFiles.delete(name);
+  } else {
+    deselectedFiles.add(name);
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -1552,7 +1586,20 @@ async function send() {
       stream:      false,
       search_mode: activeNbId ? 'documents_only' : document.getElementById('searchMode')?.value || 'general_plus_docs',
     };
-    if (activeNbId) body.notebook_id = activeNbId;
+    if (activeNbId) {
+      body.notebook_id = activeNbId;
+      const nb = notebooks.find(n => n.id === activeNbId);
+      const selected = [];
+      if (nb && nb.sources) {
+        nb.sources.forEach(s => {
+          const name = s.type === 'file' ? basename(s.value) : s.value;
+          if (!deselectedFiles.has(name)) {
+            selected.push(name);
+          }
+        });
+      }
+      body.selected_files = selected;
+    }
 
     const r = await fetch('/api/chat', {
       method:  'POST',

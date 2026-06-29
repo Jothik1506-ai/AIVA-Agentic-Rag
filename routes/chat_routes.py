@@ -754,7 +754,7 @@ from modules.utils import (
     is_referential_query
 )
 from modules.auth import require_login
-from app_state import get_system_state
+from app_state import get_system_state, get_active_llm
 from config import PAGE_SPECIFIC_TEMPLATE, config as app_config
 
 # Agentic RAG components (imported lazily so missing deps don't crash the app)
@@ -779,10 +779,64 @@ DOC_RELEVANCE_THRESHOLD = 0.7
 
 def get_managers_and_llm():
     state_data = get_system_state()
-    system_initialized, initialization_error, doc_manager, context_manager, _, _, llm = state_data
+    system_initialized, initialization_error, doc_manager, context_manager, _, _, _ = state_data
     if not system_initialized:
         return None, None, None, initialization_error or "Unknown initialization error"
-    return doc_manager, context_manager, llm, None
+    active_llm, _ = get_active_llm()
+    return doc_manager, context_manager, active_llm, None
+
+
+def _llm_invoke(prompt):
+    """Invoke LLM with automatic LM Studio → Groq fallback."""
+    active_llm, backend = get_active_llm()
+    if active_llm is None:
+        raise RuntimeError("No LLM available (LM Studio offline and Groq not configured).")
+    try:
+        return active_llm.invoke(prompt), backend
+    except Exception as primary_err:
+        # Connection error → try Groq immediately
+        if "connect" in str(primary_err).lower() or "timeout" in str(primary_err).lower():
+            from app_state import _groq_llm
+            import app_state as _as
+            if app_config.GROQ_API_KEY and app_config.GROQ_API_KEY != "your_groq_api_key_here":
+                if _as._groq_llm is None:
+                    from langchain_openai import ChatOpenAI as _CO
+                    _as._groq_llm = _CO(
+                        model=app_config.GROQ_MODEL,
+                        temperature=0.1,
+                        base_url=app_config.GROQ_BASE_URL,
+                        api_key=app_config.GROQ_API_KEY,
+                        max_tokens=app_config.LM_STUDIO_MAX_TOKENS,
+                    )
+                return _as._groq_llm.invoke(prompt), "groq"
+        raise
+
+
+def _llm_stream(prompt):
+    """Stream LLM with automatic LM Studio → Groq fallback. Yields (chunk_str, backend)."""
+    active_llm, backend = get_active_llm()
+    if active_llm is None:
+        raise RuntimeError("No LLM available (LM Studio offline and Groq not configured).")
+    try:
+        for chunk in active_llm.stream(prompt):
+            yield str(chunk), backend
+    except Exception as primary_err:
+        if "connect" in str(primary_err).lower() or "timeout" in str(primary_err).lower():
+            import app_state as _as
+            if app_config.GROQ_API_KEY and app_config.GROQ_API_KEY != "your_groq_api_key_here":
+                if _as._groq_llm is None:
+                    from langchain_openai import ChatOpenAI as _CO
+                    _as._groq_llm = _CO(
+                        model=app_config.GROQ_MODEL,
+                        temperature=0.1,
+                        base_url=app_config.GROQ_BASE_URL,
+                        api_key=app_config.GROQ_API_KEY,
+                        max_tokens=app_config.LM_STUDIO_MAX_TOKENS,
+                    )
+                for chunk in _as._groq_llm.stream(prompt):
+                    yield str(chunk), "groq"
+                return
+        raise
 
 
 def _friendly_llm_error(exc: Exception) -> str:
@@ -1564,7 +1618,9 @@ def _notebook_chat(notebook_id: str, user_message: str, context_manager, llm, da
     if isinstance(stream_requested, str):
         stream_requested = stream_requested.lower() in ['true', '1', 'yes']
 
-    context_str, meta_list = mgr.search_notebook(notebook_id, user_message, k=10)
+    selected_files = data.get('selected_files', None)
+    print(f"DEBUG: _notebook_chat received selected_files: {selected_files}")
+    context_str, meta_list = mgr.search_notebook(notebook_id, user_message, k=10, filter_files=selected_files)
 
     if not context_str:
         no_ctx = (
@@ -1610,8 +1666,8 @@ def _notebook_chat(notebook_id: str, user_message: str, context_manager, llm, da
                 yield f"data: {json.dumps({'type': 'status', 'message': 'searching notebook: ' + agent_name})}\n\n"
                 sanitizer = _incremental_sanitizer()
                 full_text = ""
-                for chunk in llm.stream(prompt):
-                    delta = sanitizer(str(chunk))
+                for chunk, _ in _llm_stream(prompt):
+                    delta = sanitizer(chunk)
                     if delta:
                         full_text += delta
                         yield f"data: {json.dumps({'type': 'token', 'content': delta})}\n\n"
@@ -1633,7 +1689,7 @@ def _notebook_chat(notebook_id: str, user_message: str, context_manager, llm, da
 
     # Non-streaming
     try:
-        response = llm.invoke(prompt)
+        response, _ = _llm_invoke(prompt)
         text = _strip_external_image_links(response.content if hasattr(response, 'content') else (response if isinstance(response, str) else str(response)))
     except Exception as e:
         err_msg = _friendly_llm_error(e)
@@ -1911,11 +1967,12 @@ def api_chat():
                     # Send images meta first
                     yield f"data: {json.dumps({'type': 'images', 'images': images})}\n\n"
 
-                    # Stream + sanitize
+                    # Stream + sanitize (auto-falls back to Groq if LM Studio drops)
                     sanitizer = _incremental_sanitizer()
                     full_response_text = ""
-                    for chunk in llm.stream(prompt):
-                        safe_delta = sanitizer(str(chunk))
+                    active_backend = "lm_studio"
+                    for chunk, active_backend in _llm_stream(prompt):
+                        safe_delta = sanitizer(chunk)
                         if not safe_delta:
                             continue
                         full_response_text += safe_delta
@@ -1942,6 +1999,7 @@ def api_chat():
                         'blocks': blocks,
                         'agentic_trace': agentic_trace if debug_trace else [],
                         'retrieval_mode': 'agentic' if agentic_trace else 'single-pass',
+                        'llm_backend': active_backend,
                     }
                     yield f"data: {json.dumps(done_message)}\n\n"
 
@@ -2044,7 +2102,7 @@ def api_chat():
             conversation_context,
             followup_force_context
         )
-        response = llm.invoke(prompt)
+        response, _backend = _llm_invoke(prompt)
         full_response_text = response.content if hasattr(response, 'content') else (response if isinstance(response, str) else str(response))
 
         # Final sanitize for non-stream

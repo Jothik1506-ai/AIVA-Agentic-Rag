@@ -366,13 +366,33 @@ def search_agent_index(
     query: str,
     embedding_model,
     k: int = 6,
+    filter_files: Optional[List[str]] = None,
 ) -> List[Dict]:
     """Search a single agent's FAISS index. Returns list of {text, source, score}."""
+    print(f"DEBUG: search_agent_index called with filter_files: {filter_files}")
+    if filter_files is not None and len(filter_files) == 0:
+        print("DEBUG: filter_files is empty list, returning empty results immediately")
+        return []
     vs = load_agent_index(agent_id, embedding_model)
     if vs is None:
         return []
     try:
-        results = vs.similarity_search_with_score(query, k=k)
+        search_filter = None
+        if filter_files is not None:
+            search_filter = lambda metadata: metadata.get("source") in filter_files
+        results = vs.similarity_search_with_score(query, k=k, filter=search_filter)
+        print(f"DEBUG: search_agent_index found {len(results)} results")
+        for doc, score in results:
+            print(f"  Found doc source: {doc.metadata.get('source')} | score: {score}")
+        
+        # Defensive post-filtering to be absolutely sure no unselected files slip through
+        if filter_files is not None:
+            results = [
+                (doc, score) for doc, score in results
+                if doc.metadata.get("source") in filter_files
+            ]
+            print(f"DEBUG: after post-filtering, {len(results)} results remain")
+
         return [
             {
                 "text":     doc.page_content,

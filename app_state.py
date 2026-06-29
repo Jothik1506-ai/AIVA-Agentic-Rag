@@ -3,6 +3,7 @@ Application state management.
 This module holds the global application state to avoid circular imports.
 """
 import os
+import logging
 from pathlib import Path
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
@@ -11,15 +12,79 @@ from modules.document_manager import AdvancedDocumentManager
 from modules.conversation import EnhancedConversationContext
 from config import config as app_config
 
+logger = logging.getLogger(__name__)
+
 # Initialize system state
 system_initialized = False
 initialization_error = None
 embedding_model = None
-llm = None
+llm = None          # primary: LM Studio
+_groq_llm = None   # fallback: Groq cloud
 doc_manager = None
 context_manager = None
 streaming_callback = None
 agent_manager = None          # ← Stage 2: AIVA Agent Manager
+
+# ── LM Studio health check ────────────────────────────────────────────────────
+
+def _lm_studio_healthy() -> bool:
+    """Ping LM Studio with a 2-second timeout. Returns True if reachable."""
+    try:
+        import urllib.request
+        url = f"{app_config.LM_STUDIO_BASE_URL.rstrip('/')}/v1/models"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=2):
+            return True
+    except Exception:
+        return False
+
+
+def get_active_llm():
+    """
+    Return the appropriate LLM client:
+      - LM Studio if it is reachable (PC on, LM Studio running)
+      - Groq cloud fallback otherwise
+    Falls back to the last known working client if both checks fail.
+    """
+    global llm, _groq_llm
+
+    if _lm_studio_healthy():
+        if llm is not None:
+            return llm, "lm_studio"
+        # LM Studio is up but llm wasn't initialised — build it now
+        try:
+            llm = ChatOpenAI(
+                model=app_config.LLM_MODEL,
+                temperature=0.1,
+                base_url=f"{app_config.LM_STUDIO_BASE_URL.rstrip('/')}/v1",
+                api_key=os.getenv("LLM_API_KEY", "lm-studio"),
+                max_tokens=app_config.LM_STUDIO_MAX_TOKENS,
+            )
+            return llm, "lm_studio"
+        except Exception as e:
+            logger.warning("[LLM] LM Studio re-init failed: %s", e)
+
+    # LM Studio unreachable — use Groq
+    if _groq_llm is not None:
+        return _groq_llm, "groq"
+
+    if app_config.GROQ_API_KEY and app_config.GROQ_API_KEY != "your_groq_api_key_here":
+        try:
+            _groq_llm = ChatOpenAI(
+                model=app_config.GROQ_MODEL,
+                temperature=0.1,
+                base_url=app_config.GROQ_BASE_URL,
+                api_key=app_config.GROQ_API_KEY,
+                max_tokens=app_config.LM_STUDIO_MAX_TOKENS,
+            )
+            logger.info("[LLM] Switched to Groq fallback (%s)", app_config.GROQ_MODEL)
+            return _groq_llm, "groq"
+        except Exception as e:
+            logger.warning("[LLM] Groq init failed: %s", e)
+
+    # Last resort: return whatever we have (may be None)
+    return llm, "lm_studio"
+
 
 def get_system_state():
     """Get the current system state"""

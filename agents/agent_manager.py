@@ -250,6 +250,7 @@ class AgentManager:
         agent_id: str,
         query: str,
         k: int = 10,
+        filter_files: Optional[List[str]] = None,
     ) -> tuple[str, List[Dict]]:
         """
         Search a single notebook (agent) by ID — bypasses routing.
@@ -268,7 +269,7 @@ class AgentManager:
             logger.info(f"[AgentManager] Notebook '{agent_id}' not indexed yet — indexing triggered.")
             return "", []
 
-        chunks = search_agent_index(agent_id, query, self.embedding_model, k=k)
+        chunks = search_agent_index(agent_id, query, self.embedding_model, k=k, filter_files=filter_files)
         if not chunks:
             return "", []
 

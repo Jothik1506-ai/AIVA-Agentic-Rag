@@ -26,7 +26,7 @@ def generate_prompt_based_on_mode(search_mode, bot_name, user_message, combined_
     
     if search_mode == 'general_plus_docs':
         if followup_force_context:
-            return f"""You are {bot_name}, an AI assistant with access to both general knowledge and specific documents.
+            return f"""You are {bot_name}, a concise AI assistant.
 
 CONVERSATION CONTEXT:
 {conversation_context}
@@ -37,15 +37,13 @@ DOCUMENT CONTENT (if available):
 QUESTION: {user_message}
 
 INSTRUCTIONS:
-- This is a follow-up question. Build upon and expand the previous answer.
-- First, check if the document content provides relevant information.
-- If documents have relevant info, use it and cite the sources.
-- If documents don't have sufficient info, use your general knowledge to provide a comprehensive answer.
-- You can combine document information with general knowledge for a complete response.
+- Give a short, direct follow-up answer (2-4 sentences max unless a list is clearly needed).
+- Use document content if relevant, otherwise use general knowledge.
+- No padding, no repetition, no lengthy intros.
 
 ANSWER:"""
         else:
-            return f"""You are {bot_name}, an AI assistant with access to both general knowledge and specific documents.
+            return f"""You are {bot_name}, a concise AI assistant.
 
 CONVERSATION CONTEXT:
 {conversation_context}
@@ -56,17 +54,16 @@ DOCUMENT CONTENT (if available):
 QUESTION: {user_message}
 
 INSTRUCTIONS:
-- First, check if the document content provides relevant information.
-- If documents have relevant info, prioritize it and cite the sources.
-- If documents don't have sufficient info or no documents are available, use your general knowledge to provide a comprehensive answer.
-- For general knowledge questions (like "what are prime numbers"), feel free to answer using your training data.
-- You can combine document information with general knowledge for a complete response.
+- Answer directly and briefly (2-4 sentences unless a list/table is clearly needed).
+- Prioritize document content; cite source if used.
+- If documents have no relevant info, answer from general knowledge.
+- No filler phrases, no lengthy explanations.
 
 ANSWER:"""
-    
+
     else:  # documents_only mode (default)
         if followup_force_context:
-            return f"""You are {bot_name}. This is a follow-up question that builds upon previous conversation.
+            return f"""You are {bot_name}. Answer from the documents below only.
 
 CONVERSATION CONTEXT:
 {conversation_context}
@@ -76,14 +73,14 @@ DOCUMENT CONTENT:
 
 QUESTION: {user_message}
 
-IMPORTANT: 
-- This is a follow-up question. Please build upon and expand the previous answer with additional details, examples, or explanations.
-- Answer ONLY based on the information provided in the document content above.
-- If the information is not in the documents, clearly state: "This information is not available in the loaded documents."
+INSTRUCTIONS:
+- Give a short, focused follow-up answer (2-4 sentences max unless a list is clearly needed).
+- Base answer strictly on the document content above.
+- If not in the documents, say: "This information is not in the loaded documents."
 
 ANSWER:"""
         else:
-            return f"""You are {bot_name}. Based on the following document content, answer the question comprehensively.
+            return f"""You are {bot_name}. Answer from the documents below only.
 
 CONVERSATION CONTEXT:
 {conversation_context}
@@ -93,11 +90,10 @@ DOCUMENT CONTENT:
 
 QUESTION: {user_message}
 
-IMPORTANT:
-- Provide a detailed answer based ONLY on the document content above.
-- Include specific information, names, numbers, and details as available in the documents.
-- If the information is not in the documents, clearly state: "This information is not available in the loaded documents."
-- Do NOT use external knowledge or make assumptions beyond what's in the documents.
+INSTRUCTIONS:
+- Be brief and direct (2-4 sentences max unless a list/table is clearly needed).
+- Use only the document content above — no external knowledge.
+- If not in the documents, say: "This information is not in the loaded documents."
 
 ANSWER:"""
 

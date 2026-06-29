@@ -176,10 +176,15 @@ class RAGConfig:
         "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"  # Better multilingual support
     ]
     EMBED_MODEL = EMBED_MODEL_OPTIONS[1]  # Use better model for technical content
-    # Override via .env (LLM_MODEL, LM_STUDIO_MAX_TOKENS). Default: gemma-4 via LM Studio.
-    LLM_MODEL = os.getenv("LLM_MODEL", "gemma-4")
-    LM_STUDIO_MAX_TOKENS = int(os.getenv("LM_STUDIO_MAX_TOKENS", "2048"))
+    # Primary LLM – LM Studio (local)
+    LLM_MODEL = os.getenv("LLM_MODEL", "google/gemma-4-12b-qat")
+    LLM_DISPLAY_NAME = os.getenv("LLM_DISPLAY_NAME", "AIVA-1-12B")
+    LM_STUDIO_MAX_TOKENS = int(os.getenv("LM_STUDIO_MAX_TOKENS", "512"))
     LM_STUDIO_BASE_URL = os.getenv("LM_STUDIO_BASE_URL", "http://localhost:1234")
+    # Fallback LLM – Groq cloud (used when LM Studio is offline)
+    GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+    GROQ_MODEL = os.getenv("GROQ_MODEL", "gemma2-9b-it")
+    GROQ_BASE_URL = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
     
     # Device configuration for optimal performance
     DEVICE = OPTIMAL_DEVICE

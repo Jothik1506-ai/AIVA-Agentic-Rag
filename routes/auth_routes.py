@@ -39,7 +39,12 @@ def login():
 def chatbot():
     """Serve the main chatbot interface"""
     try:
-        return render_template('chatbot_new.html')
+        from flask import make_response
+        response = make_response(render_template('chatbot_new.html'))
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        return response
     except Exception as e:
         return f"Template error: {e}", 500
 
@@ -48,7 +53,12 @@ def chatbot():
 def aiva():
     """Serve the AIVA AI chat interface (no login required)"""
     try:
-        return render_template('graphrag_chat_ui.html')
+        from flask import make_response
+        response = make_response(render_template('graphrag_chat_ui.html'))
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        return response
     except Exception as e:
         return f"Template error: {e}", 500
 
