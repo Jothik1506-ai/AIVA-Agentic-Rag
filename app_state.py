@@ -5,7 +5,6 @@ This module holds the global application state to avoid circular imports.
 import os
 import logging
 from pathlib import Path
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_openai import ChatOpenAI
 from modules.document_manager import AdvancedDocumentManager
@@ -101,28 +100,43 @@ def initialize_system():
     try:
         print("Initializing RAG system...")
         
-        # Initialize embedding model - use the same model that was used to create embeddings
-        print(f"Loading embedding model on {app_config.DEVICE}...")
-        try:
-            # Use the first model from EMBED_MODEL_OPTIONS (same as embedding creator)
-            embedding_model = HuggingFaceEmbeddings(
-                model_name=app_config.EMBED_MODEL_OPTIONS[0],
-                model_kwargs={'device': app_config.DEVICE},
-                encode_kwargs={'normalize_embeddings': True}
-            )
-            print(f"✅ Embedding model loaded: {app_config.EMBED_MODEL_OPTIONS[0]} on {app_config.DEVICE}")
-        except Exception as e1:
+        # Initialize embedding model
+        # Cloud (Render): uses HuggingFace Inference API — no torch/local model needed
+        # Local (PC):     uses HuggingFaceEmbeddings with local sentence-transformers
+        hf_api_key = getattr(app_config, "HF_API_KEY", "") or os.getenv("HF_API_KEY", "")
+        if hf_api_key:
+            print("🌐 Using HuggingFace Inference API for embeddings (cloud mode)...")
             try:
-                # Fallback to the second model
-                print(f"Warning: Failed to load primary model, trying fallback {app_config.EMBED_MODEL}...")
+                from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
+                embed_model_name = app_config.EMBED_MODEL_OPTIONS[0]
+                embedding_model = HuggingFaceInferenceAPIEmbeddings(
+                    api_key=hf_api_key,
+                    model_name=embed_model_name,
+                )
+                print(f"✅ Embedding model (API): {embed_model_name}")
+            except Exception as e:
+                raise Exception(f"HuggingFace Inference API embedding failed: {e}")
+        else:
+            print(f"💻 Loading local embedding model on {app_config.DEVICE}...")
+            try:
+                from langchain_huggingface import HuggingFaceEmbeddings
                 embedding_model = HuggingFaceEmbeddings(
-                    model_name=app_config.EMBED_MODEL,
+                    model_name=app_config.EMBED_MODEL_OPTIONS[0],
                     model_kwargs={'device': app_config.DEVICE},
                     encode_kwargs={'normalize_embeddings': True}
                 )
-                print(f"✅ Fallback embedding model loaded: {app_config.EMBED_MODEL} on {app_config.DEVICE}")
-            except Exception as e2:
-                raise Exception(f"Failed to load any embedding model: {e2}")
+                print(f"✅ Embedding model loaded: {app_config.EMBED_MODEL_OPTIONS[0]} on {app_config.DEVICE}")
+            except Exception as e1:
+                try:
+                    from langchain_huggingface import HuggingFaceEmbeddings
+                    embedding_model = HuggingFaceEmbeddings(
+                        model_name=app_config.EMBED_MODEL,
+                        model_kwargs={'device': app_config.DEVICE},
+                        encode_kwargs={'normalize_embeddings': True}
+                    )
+                    print(f"✅ Fallback embedding model: {app_config.EMBED_MODEL}")
+                except Exception as e2:
+                    raise Exception(f"Failed to load any embedding model: {e2}")
         
         # Initialize LLM via LM Studio's OpenAI-compatible endpoint
         print("Initializing language model...")

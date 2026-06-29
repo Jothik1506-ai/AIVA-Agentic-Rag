@@ -185,6 +185,8 @@ class RAGConfig:
     GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
     GROQ_MODEL = os.getenv("GROQ_MODEL", "gemma2-9b-it")
     GROQ_BASE_URL = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+    # Embeddings – HuggingFace Inference API (cloud) vs local sentence-transformers (PC)
+    HF_API_KEY = os.getenv("HF_API_KEY", "")
     
     # Device configuration for optimal performance
     DEVICE = OPTIMAL_DEVICE
