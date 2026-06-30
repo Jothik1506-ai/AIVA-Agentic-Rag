@@ -31,14 +31,13 @@ Jinja2==3.1.6
 joblib==1.5.3
 jsonpatch==1.33
 jsonpointer==3.0.0
-langchain-classic==1.0.1
-langchain-community==0.4.1
-langchain-core==1.2.16
-# langchain-huggingface removed — cloud uses huggingface_hub InferenceClient directly;
-# local installs should add: langchain-huggingface>=0.2.0 + sentence-transformers
-langchain-openai==0.3.14
-langchain-text-splitters==1.1.1
-langsmith==0.7.9
+# langchain-classic removed — only used as optional fallback in config.py (RetrievalQA = None)
+langchain-community>=0.4.0,<1.0.0
+langchain-core>=1.0.0,<2.0.0
+# langchain-huggingface removed — cloud uses huggingface_hub InferenceClient directly
+langchain-openai>=0.3.14
+langchain-text-splitters>=1.0.0,<2.0.0
+langsmith>=0.5.0
 markdown-it-py==4.0.0
 MarkupSafe==3.0.3
 marshmallow==3.26.2
