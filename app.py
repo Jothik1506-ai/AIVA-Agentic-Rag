@@ -145,6 +145,14 @@ def csrf_origin_check():
     if request.method in ('GET', 'HEAD', 'OPTIONS'):
         return
     origin = request.headers.get('Origin', '')
+    
+    # Allow same-origin requests automatically
+    if origin:
+        from urllib.parse import urlparse
+        parsed_origin = urlparse(origin)
+        if parsed_origin.netloc == request.host:
+            return
+            
     if origin and origin not in _ALLOWED_ORIGINS:
         return jsonify({'error': 'Forbidden'}), 403
 
@@ -155,7 +163,15 @@ def csrf_origin_check():
 @app.after_request
 def add_cors_headers(response):
     origin = request.headers.get('Origin', '')
-    if origin in _ALLOWED_ORIGINS:
+    
+    is_same_origin = False
+    if origin:
+        from urllib.parse import urlparse
+        parsed_origin = urlparse(origin)
+        if parsed_origin.netloc == request.host:
+            is_same_origin = True
+            
+    if origin in _ALLOWED_ORIGINS or is_same_origin:
         response.headers['Access-Control-Allow-Origin'] = origin
         response.headers['Access-Control-Allow-Credentials'] = 'true'
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
