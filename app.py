@@ -195,10 +195,28 @@ def internal_error(error):
 # System init — runs for both gunicorn (cloud) and direct python app.py (local)
 # -------------------------------------------------------
 from app_state import initialize_system
-
 import threading as _threading
-_init_thread = _threading.Thread(target=initialize_system, daemon=True, name="system-init")
-_init_thread.start()
+import os
+
+_init_lock = _threading.Lock()
+_init_pid = None
+_init_thread = None
+
+def start_system_init():
+    global _init_pid, _init_thread
+    with _init_lock:
+        current_pid = os.getpid()
+        if _init_pid != current_pid:
+            _init_pid = current_pid
+            _init_thread = _threading.Thread(target=initialize_system, daemon=True, name="system-init")
+            _init_thread.start()
+    return _init_thread
+
+start_system_init()
+
+@app.before_request
+def ensure_initialized_in_worker():
+    start_system_init()
 
 if __name__ == '__main__':
     import sys
