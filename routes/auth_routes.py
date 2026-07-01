@@ -70,9 +70,9 @@ def chatbot():
 
 @auth_bp.route('/aiva')
 def aiva():
-    """Serve the AIVA AI chat interface — requires login session"""
+    """Serve the AIVA AI chat interface — bypasses login"""
     if not session.get('user_designation'):
-        return redirect(url_for('auth.login'))
+        session['user_designation'] = 'Admin'
     try:
         from flask import make_response
         response = make_response(render_template('graphrag_chat_ui.html'))
