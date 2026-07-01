@@ -1732,10 +1732,17 @@ def _notebook_chat(notebook_id: str, user_message: str, context_manager, llm, da
 def api_chat():
     doc_manager, context_manager, llm, error = get_managers_and_llm()
     if error:
-        return jsonify({'error': 'System not initialized', 'message': error}), 500
-    # Allow requests without LLM - can still do document search
-    # if llm is None:
-    #     return jsonify({'error': 'System not initialized', 'message': 'Language model (LLM) is not available.'}), 500
+        msg = f"⚠️ {error}"
+        return jsonify({
+            'response': msg,
+            'query_type': "error",
+            'sources': [],
+            'processing_time': 0.0,
+            'images': [],
+            'blocks': [{"type": "text", "content": msg}],
+            'agentic_trace': [],
+            'retrieval_mode': 'single-pass',
+        }), 200
 
     try:
         data = request.get_json()
