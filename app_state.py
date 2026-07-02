@@ -8,6 +8,7 @@ import logging
 import functools
 from pathlib import Path
 from langchain_community.vectorstores import FAISS
+from langchain_core.embeddings import Embeddings as _LCEmbeddings
 from langchain_openai import ChatOpenAI
 from modules.document_manager import AdvancedDocumentManager
 from modules.conversation import EnhancedConversationContext
@@ -129,9 +130,13 @@ def initialize_system():
             if _IClient is None:
                 raise Exception("huggingface_hub is not installed — cannot use Inference API embeddings")
             try:
-                # Plain class — no langchain abstract base needed, FAISS uses duck-typing
+                # Must subclass langchain's Embeddings ABC: FAISS checks
+                # isinstance(self.embeddings, Embeddings) at query time and
+                # otherwise treats the object as a legacy callable — plain
+                # duck-typing crashes every similarity_search with
+                # "'_HFInferenceEmbeddings' object is not callable".
                 # Client is created lazily on first use to avoid blocking during startup.
-                class _HFInferenceEmbeddings:
+                class _HFInferenceEmbeddings(_LCEmbeddings):
                     def __init__(self, api_key: str, model: str):
                         self._api_key = api_key
                         self._model = model
