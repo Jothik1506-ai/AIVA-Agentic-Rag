@@ -435,6 +435,25 @@
     }
     .btn-logout:hover { border-color: #555; color: var(--nb-text); }
 
+    /* Fenced code blocks in chat messages */
+    .md-pre {
+      background: rgba(8, 14, 26, .55);
+      border: 1px solid rgba(127, 140, 170, .25);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin: 8px 0;
+      overflow-x: auto;
+    }
+    .md-pre code {
+      font-family: ui-monospace, Consolas, 'Courier New', monospace;
+      font-size: 12px;
+      line-height: 1.55;
+      color: inherit;
+      white-space: pre;
+      background: none;
+      padding: 0;
+    }
+
     /* ═══════════════════════════════════════════════════════════════
        CENTER PANEL — Chat
     ═══════════════════════════════════════════════════════════════ */
@@ -1817,11 +1836,25 @@ function esc(s) {
 function eid(id) { return id.replace(/[^a-zA-Z0-9_-]/g,'_'); }
 
 function mdToHtml(text) {
-  return esc(text)
+  // 1. Pull out fenced code blocks FIRST so the inline rules (backticks,
+  //    *emphasis*, <br>) can't mangle their contents.
+  const codeBlocks = [];
+  let html = esc(text).replace(/```(\w*)\r?\n?([\s\S]*?)```/g, (m, lang, code) => {
+    codeBlocks.push(
+      '<pre class="md-pre"><code>' + code.replace(/\s+$/, '') + '</code></pre>'
+    );
+    return '\u0000' + (codeBlocks.length - 1) + '\u0000';
+  });
+
+  // 2. Inline markdown on the remaining text
+  html = html
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g,     '<em>$1</em>')
-    .replace(/`([^`]+)`/g,     '<code style="background:#F0F1F5;padding:1px 5px;border-radius:4px;font-size:12px;font-family:monospace;">$1</code>')
+    .replace(/`([^`]+)`/g,     '<code style="background:rgba(127,140,170,.18);padding:1px 5px;border-radius:4px;font-size:12px;font-family:monospace;">$1</code>')
     .replace(/\n/g, '<br>');
+
+  // 3. Restore the code blocks
+  return html.replace(/\u0000(\d+)\u0000/g, (m, i) => codeBlocks[+i]);
 }
 
 function basename(p) {
