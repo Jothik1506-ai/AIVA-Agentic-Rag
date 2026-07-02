@@ -183,7 +183,10 @@ class RAGConfig:
     LM_STUDIO_BASE_URL = os.getenv("LM_STUDIO_BASE_URL", "http://localhost:1234")
     # Fallback LLM – Groq cloud (used when LM Studio is offline)
     GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-    GROQ_MODEL = os.getenv("GROQ_MODEL", "gemma2-9b-it")
+    # gemma2-9b-it was decommissioned by Groq (Oct 2025) and
+    # llama-3.1-8b-instant is deprecated effective 2026-08-16;
+    # openai/gpt-oss-20b is Groq's recommended fast production model.
+    GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
     GROQ_BASE_URL = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
     # Embeddings – HuggingFace Inference API (cloud) vs local sentence-transformers (PC)
     HF_API_KEY = os.getenv("HF_API_KEY", "")
