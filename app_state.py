@@ -165,7 +165,14 @@ def initialize_system():
                     def embed_query(self, text: str):
                         return list(self._encode(text))
 
-                embed_model_name = app_config.EMBED_MODEL_OPTIONS[0]
+                # HF's serverless inference (hf-inference provider) no longer
+                # serves sentence-transformers/all-MiniLM-L6-v2 — requests fail
+                # with "Model not supported by provider hf-inference".
+                # BAAI/bge-small-en-v1.5 is served, and is a drop-in 384-dim
+                # replacement. Note: indexes are only searchable with the same
+                # model that built them, so cloud indexes must be built in the
+                # cloud (uploads re-index there anyway).
+                embed_model_name = os.getenv("CLOUD_EMBED_MODEL", "BAAI/bge-small-en-v1.5")
                 embedding_model = _HFInferenceEmbeddings(
                     api_key=hf_api_key,
                     model=embed_model_name,
