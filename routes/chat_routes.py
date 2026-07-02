@@ -1615,6 +1615,61 @@ def _agentic_retrieve(
 
 
 # ==============
+# ReAct Agent Chat (LLM-controlled retrieval loop)
+# ==============
+
+def _react_agent_chat(user_message: str, doc_manager, context_manager, data: dict):
+    """
+    Agentic RAG mode where the LLM drives retrieval itself via tools
+    (search_knowledge_base / get_document_pages / list_available_documents),
+    reflecting on observations and reformulating queries until it can give a
+    grounded, cited answer. Enabled per-request with {"agent_mode": "react"}.
+    """
+    from agents.react_agent import agent_query_loop
+
+    t0 = time.time()
+
+    # Short conversation history for the agent's context
+    history_lines = []
+    for ex in getattr(context_manager, 'conversation_history', [])[-4:]:
+        history_lines.append(f"User: {ex.question}\nAssistant: {ex.answer[:300]}")
+    history_str = "\n".join(history_lines)
+
+    def _invoke(messages):
+        result, _backend = _llm_invoke(messages)
+        return result
+
+    max_iters = int(getattr(app_config, 'MAX_REACT_ITERATIONS', 5))
+    try:
+        answer, trace, sources = agent_query_loop(
+            user_message, history_str, doc_manager, context_manager,
+            llm_invoke=_invoke, max_iterations=max_iters,
+        )
+    except Exception as e:
+        logger.error(f"ReAct agent failed: {e}\n{traceback.format_exc()}")
+        msg = f"Agent error: {e}"
+        return jsonify({
+            'response': msg, 'query_type': 'react_agent_error', 'sources': [],
+            'processing_time': round(time.time() - t0, 2), 'images': [],
+            'blocks': [{"type": "text", "content": msg}],
+            'agentic_trace': [], 'retrieval_mode': 'react-agent',
+        }), 200
+
+    context_manager.add_exchange(question=user_message, answer=answer,
+                                 sources=[], context_used='', query_type='react_agent')
+    return jsonify({
+        'response': answer,
+        'query_type': 'react_agent',
+        'sources': sources,
+        'processing_time': round(time.time() - t0, 2),
+        'images': [],
+        'blocks': [{"type": "text", "content": answer}],
+        'agentic_trace': trace,
+        'retrieval_mode': 'react-agent',
+    })
+
+
+# ==============
 # Notebook Chat
 # ==============
 
@@ -1798,6 +1853,10 @@ def api_chat():
         # ── Notebook mode: search only the selected notebook's index ──────────
         if notebook_id:
             return _notebook_chat(notebook_id, user_message, context_manager, llm, data)
+
+        # ── ReAct agent mode: the LLM drives retrieval itself via tools ───────
+        if data.get('agent_mode') == 'react':
+            return _react_agent_chat(user_message, doc_manager, context_manager, data)
 
         # 1) casual
         conversation_response = detect_casual_conversation(user_message, selected_documents)
