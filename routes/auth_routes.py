@@ -85,9 +85,15 @@ def aiva():
         return redirect(url_for('auth.login'))
     if not session.get('user_designation'):
         session['user_designation'] = 'Admin'
+    display_name = session.get('aiva_display_name') or \
+        session.get('aiva_user_id', '').split(':', 1)[-1] or 'AIVA User'
     try:
         from flask import make_response
-        response = make_response(render_template('graphrag_chat_ui.html'))
+        response = make_response(render_template(
+            'graphrag_chat_ui.html',
+            user_name=display_name,
+            user_initial=(display_name[:1] or 'A').upper(),
+        ))
         response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
@@ -139,7 +145,7 @@ def api_auth_register():
     user_id, err = create_local_user(data.get('username', ''), data.get('password', ''))
     if err:
         return jsonify({'error': err}), 400
-    login_session_user(user_id)
+    login_session_user(user_id, user_id.split(':', 1)[-1])
     return jsonify({'message': 'Account created', 'user_id': user_id,
                     'redirect_url': url_for('auth.aiva')}), 201
 
@@ -154,7 +160,7 @@ def api_auth_login():
     user_id = verify_local_user(data.get('username', ''), data.get('password', ''))
     if not user_id:
         return jsonify({'error': 'Invalid username or password'}), 401
-    login_session_user(user_id)
+    login_session_user(user_id, user_id.split(':', 1)[-1])
     return jsonify({'message': 'Login successful', 'user_id': user_id,
                     'redirect_url': url_for('auth.aiva')})
 
@@ -163,10 +169,11 @@ def api_auth_login():
 def api_auth_google():
     """Log in with a Google Sign-In credential (ID token), verified server-side."""
     data = request.get_json(silent=True) or {}
-    user_id = google_login_from_credential(data.get('credential', ''))
-    if not user_id:
+    verified = google_login_from_credential(data.get('credential', ''))
+    if not verified:
         return jsonify({'error': 'Google sign-in could not be verified'}), 401
-    login_session_user(user_id)
+    user_id, display_name = verified
+    login_session_user(user_id, display_name)
     return jsonify({'message': 'Login successful', 'user_id': user_id,
                     'redirect_url': url_for('auth.aiva')})
 
@@ -176,6 +183,13 @@ def api_auth_me():
     """Return the logged-in user (login page uses this to skip itself)."""
     uid = session.get('aiva_user_id')
     return jsonify({'logged_in': bool(uid), 'user_id': uid})
+
+
+@auth_bp.route('/logout')
+def logout_page():
+    """Log out and return to the login page."""
+    clear_user_session()
+    return redirect(url_for('auth.login'))
 
 
 @auth_bp.route('/api/logout', methods=['POST'])

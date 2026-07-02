@@ -45,14 +45,14 @@ _TOKEN_CACHE_MAX = 1000
 
 
 def _verify_google_id_token(token: str):
-    """Verify a Google ID token and return 'google:<sub>' or None."""
+    """Verify a Google ID token. Returns ('google:<sub>', display_name) or None."""
     fp = hashlib.sha256(token.encode()).hexdigest()
     now = time.time()
 
     with _token_cache_lock:
         cached = _token_cache.get(fp)
-        if cached and cached[1] > now:
-            return cached[0]
+        if cached and cached[2] > now:
+            return cached[0], cached[1]
 
     try:
         resp = requests.get(_GOOGLE_TOKENINFO_URL, params={"id_token": token}, timeout=5)
@@ -70,12 +70,13 @@ def _verify_google_id_token(token: str):
             logger.warning("Google token audience mismatch")
             return None
         user_id = f"google:{sub}"
+        display = claims.get("name") or claims.get("email") or "Google user"
         expires_at = float(claims.get("exp", now + 300))
         with _token_cache_lock:
             if len(_token_cache) >= _TOKEN_CACHE_MAX:
                 _token_cache.clear()
-            _token_cache[fp] = (user_id, expires_at)
-        return user_id
+            _token_cache[fp] = (user_id, display, expires_at)
+        return user_id, display
     except Exception as e:
         logger.warning("Google token verification failed: %s", e)
         return None
@@ -98,7 +99,9 @@ def get_current_user_id() -> str:
         token = auth_header[len("Bearer "):].strip()
         # Only attempt Google verification for JWT-shaped tokens
         if token.count(".") == 2:
-            user_id = _verify_google_id_token(token)
+            verified = _verify_google_id_token(token)
+            if verified:
+                user_id = verified[0]
 
     # 2. Logged-in session (login page: local account or Google Sign-In)
     if not user_id:
@@ -202,14 +205,15 @@ def verify_local_user(username: str, password: str):
     return f"local:{username}"
 
 
-def login_session_user(user_id: str) -> None:
+def login_session_user(user_id: str, display_name: str = "") -> None:
     """Persist a verified identity into the Flask session."""
     session["aiva_user_id"] = user_id
+    session["aiva_display_name"] = display_name or user_id.split(":", 1)[-1]
     session.permanent = True
 
 
 def google_login_from_credential(credential: str):
-    """Verify a Google Sign-In credential (ID token). Returns user_id or None."""
+    """Verify a Google Sign-In credential. Returns (user_id, display) or None."""
     if not credential or credential.count(".") != 2:
         return None
     return _verify_google_id_token(credential)

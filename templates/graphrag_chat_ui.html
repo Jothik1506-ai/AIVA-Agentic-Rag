@@ -952,10 +952,12 @@
 
     <div class="lp-footer">
       <div class="user-pill">
-        <div class="u-avatar">A</div>
-        <span class="u-name">AIVA User</span>
+        <div class="u-avatar">{{ user_initial or 'A' }}</div>
+        <span class="u-name">{{ user_name or 'AIVA User' }}</span>
       </div>
-      <button class="btn-logout" onclick="window.location.href='/logout'">Logout</button>
+      <button class="btn-logout"
+        onclick="fetch('/api/logout',{method:'POST'}).finally(()=>{window.location.href='/login';})">
+        Logout</button>
     </div>
   </aside>
 
