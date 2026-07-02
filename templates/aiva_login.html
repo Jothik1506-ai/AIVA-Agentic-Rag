@@ -41,13 +41,7 @@
   .ribbon img { width: 78%; max-width: 560px; opacity: .95; }
   .content { position: relative; z-index: 1; }
 
-  h1 {
-    color: #f4f6fa; text-align: center;
-    font-weight: 400; font-size: clamp(28px, 4.5vw, 42px); line-height: 1.25;
-  }
-  h1 span { display: block; }
-
-  form { margin-top: 56px; }
+  form { margin-top: 96px; }
   .fields {
     display: flex; justify-content: space-between; gap: 40px;
     flex-wrap: wrap;
@@ -129,8 +123,6 @@
       </div>
 
       <div class="content">
-        <h1>AIVA<span id="subtitle">Enter your credentials</span></h1>
-
         <form id="authForm" autocomplete="on">
           <div class="fields">
             <div class="field">
@@ -178,14 +170,12 @@
   const form      = document.getElementById('authForm');
   const btn       = document.getElementById('submitBtn');
   const modeBtn   = document.getElementById('modeSwitch');
-  const subtitle  = document.getElementById('subtitle');
   const errorBox  = document.getElementById('errorBox');
 
   modeBtn.addEventListener('click', () => {
     registerMode = !registerMode;
     btn.textContent      = registerMode ? 'Create account' : 'Login';
     modeBtn.textContent  = registerMode ? 'Already have an account? Login' : 'Create an account';
-    subtitle.textContent = registerMode ? 'Create your account' : 'Enter your credentials';
     errorBox.textContent = '';
   });
 
