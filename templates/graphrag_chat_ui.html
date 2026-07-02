@@ -928,6 +928,43 @@
 
     /* Hidden file input */
     #fileInput { display: none; }
+
+    /* ═══════════════════════════════════════════════════════════════
+       Figma palette — chat area #FEFEFE @ 80%, nav bar #878787 @ 100%
+       (applies in both themes; chat-area text forced dark for contrast)
+    ═══════════════════════════════════════════════════════════════ */
+    .center-panel { background: rgba(254, 254, 254, 0.80); }
+
+    .top-bar {
+      background: #878787;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.18);
+    }
+    .top-bar .hamburger { color: #f2f2f2; }
+    .top-bar .hamburger:hover { background: rgba(255, 255, 255, 0.18); color: #fff; }
+
+    .center-panel .welcome h1 { color: #1a2540; }
+    .center-panel .welcome p  { color: #4a607a; }
+
+    .msg-row.ai .bubble {
+      background: rgba(255, 255, 255, 0.92);
+      border-color: rgba(0, 0, 0, 0.10);
+      color: #1a2540;
+    }
+    .msg-row.user .bubble {
+      background: rgba(59, 92, 245, 0.15);
+      color: #1a2540;
+    }
+    .msg-row.ai .msg-avatar { background: #ffffff; border-color: rgba(0,0,0,.12); }
+
+    .center-panel .input-box {
+      background: rgba(255, 255, 255, 0.95);
+      border-color: rgba(0, 0, 0, 0.12);
+    }
+    .center-panel .input-box textarea { color: #1a2540; }
+
+    /* Code blocks stay dark inside the light bubbles */
+    .center-panel .md-pre { background: #141c2c; border-color: rgba(0,0,0,.25); }
+    .center-panel .md-pre code { color: #dbe4f0; }
   </style>
 </head>
 <body>
