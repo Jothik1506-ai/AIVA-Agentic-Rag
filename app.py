@@ -119,6 +119,50 @@ def health_check():
         }), 503
 
 # -------------------------------------------------------
+# Temporary diagnostic: probe which HF embedding routes work
+# with the server's API key. Read-only; never reveals the key.
+# -------------------------------------------------------
+@app.route('/api/embed-diag', methods=['GET'])
+def embed_diag():
+    import requests as _rq
+    key = os.environ.get('HF_API_KEY', '')
+    if not key:
+        return jsonify({'error': 'HF_API_KEY not set'}), 400
+    headers = {'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'}
+    candidates = [
+        ('router_v1_bge_small', 'https://router.huggingface.co/v1/embeddings',
+         {'model': 'BAAI/bge-small-en-v1.5', 'input': 'hello world'}),
+        ('router_v1_qwen3_06b', 'https://router.huggingface.co/v1/embeddings',
+         {'model': 'Qwen/Qwen3-Embedding-0.6B', 'input': 'hello world'}),
+        ('router_v1_e5_large', 'https://router.huggingface.co/v1/embeddings',
+         {'model': 'intfloat/multilingual-e5-large', 'input': 'hello world'}),
+        ('router_v1_minilm', 'https://router.huggingface.co/v1/embeddings',
+         {'model': 'sentence-transformers/all-MiniLM-L6-v2', 'input': 'hello world'}),
+        ('pipeline_bge_small',
+         'https://router.huggingface.co/hf-inference/models/BAAI/bge-small-en-v1.5/pipeline/feature-extraction',
+         {'inputs': 'hello world'}),
+    ]
+    results = {}
+    for name, url, payload in candidates:
+        try:
+            r = _rq.post(url, headers=headers, json=payload, timeout=20)
+            detail = r.text[:200]
+            if r.status_code == 200:
+                try:
+                    j = r.json()
+                    if isinstance(j, dict) and 'data' in j:
+                        detail = f"dim={len(j['data'][0]['embedding'])}"
+                    elif isinstance(j, list):
+                        inner = j[0] if j and isinstance(j[0], list) else j
+                        detail = f"list len={len(j)} inner={len(inner) if hasattr(inner, '__len__') else '?'}"
+                except Exception:
+                    pass
+            results[name] = {'status': r.status_code, 'ok': r.status_code == 200, 'detail': detail}
+        except Exception as e:
+            results[name] = {'status': None, 'ok': False, 'detail': str(e)[:200]}
+    return jsonify(results)
+
+# -------------------------------------------------------
 # Blueprints
 # -------------------------------------------------------
 app.register_blueprint(auth_bp)
