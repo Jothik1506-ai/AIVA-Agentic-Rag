@@ -387,7 +387,7 @@ _LOADED_INDEX_CACHE: dict = {}
 _LOADED_INDEX_LOCK = threading.Lock()
 
 
-def load_agent_index(agent_id: str, embedding_model):
+def load_agent_index(agent_id: str, embedding_model, raise_errors: bool = False):
     """Load the FAISS vectorstore for an agent. Returns None if not indexed yet."""
     try:
         from langchain_community.vectorstores import FAISS
@@ -410,6 +410,8 @@ def load_agent_index(agent_id: str, embedding_model):
         return vs
     except Exception as e:
         logger.warning(f"[indexer] Could not load index for '{agent_id}': {e}")
+        if raise_errors:
+            raise RuntimeError(f"FAISS index for '{agent_id}' could not be loaded: {e}") from e
         return None
 
 
@@ -436,7 +438,7 @@ def search_agent_index(
     if filter_files is not None and len(filter_files) == 0:
         logger.debug("filter_files is empty list, returning empty results immediately")
         return []
-    vs = load_agent_index(agent_id, embedding_model)
+    vs = load_agent_index(agent_id, embedding_model, raise_errors=raise_errors)
     if vs is None:
         return []
     try:
