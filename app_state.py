@@ -17,10 +17,7 @@ from config import config as app_config
 # Imported at module level (not inside the init thread) — importing heavy
 # packages from a daemon thread during worker startup can wedge on the
 # import lock and leave the system stuck in "initializing" forever.
-try:
-    from huggingface_hub import InferenceClient as _IClient
-except ImportError:
-    _IClient = None
+import requests as _requests
 import numpy as _np
 
 logger = logging.getLogger(__name__)
@@ -127,51 +124,78 @@ def initialize_system():
         hf_api_key = getattr(app_config, "HF_API_KEY", "") or os.getenv("HF_API_KEY", "")
         if hf_api_key:
             _step_log("Step 1/4: HuggingFace Inference API embeddings (cloud mode)...")
-            if _IClient is None:
-                raise Exception("huggingface_hub is not installed — cannot use Inference API embeddings")
             try:
                 # Must subclass langchain's Embeddings ABC: FAISS checks
                 # isinstance(self.embeddings, Embeddings) at query time and
                 # otherwise treats the object as a legacy callable — plain
                 # duck-typing crashes every similarity_search with
                 # "'_HFInferenceEmbeddings' object is not callable".
-                # Client is created lazily on first use to avoid blocking during startup.
+                #
+                # Calls the HF pipeline URL directly with `requests`:
+                # huggingface_hub's InferenceClient rejects this model
+                # CLIENT-SIDE ("Model not supported by provider hf-inference")
+                # from a stale provider-mapping check, while the actual
+                # endpoint works fine (verified via /api/embed-diag).
                 class _HFInferenceEmbeddings(_LCEmbeddings):
                     def __init__(self, api_key: str, model: str):
                         self._api_key = api_key
                         self._model = model
-                        self._client = None  # created on first call
+                        self._url = (
+                            "https://router.huggingface.co/hf-inference/models/"
+                            f"{model}/pipeline/feature-extraction"
+                        )
                         # Each embed is a remote HTTP call; the same query is embedded
                         # once per document per agentic iteration, so cache by text.
                         self._encode = functools.lru_cache(maxsize=512)(self._encode_uncached)
 
-                    def _get_client(self):
-                        if self._client is None:
-                            self._client = _IClient(token=self._api_key)
-                        return self._client
+                    def _post(self, inputs):
+                        last_err = None
+                        for attempt in range(3):
+                            try:
+                                r = _requests.post(
+                                    self._url,
+                                    headers={"Authorization": f"Bearer {self._api_key}"},
+                                    json={"inputs": inputs},
+                                    timeout=30,
+                                )
+                                if r.status_code == 503:  # HF-side model cold load
+                                    time.sleep(3 * (attempt + 1))
+                                    continue
+                                r.raise_for_status()
+                                return r.json()
+                            except Exception as e:
+                                last_err = e
+                                time.sleep(1 + attempt)
+                        raise RuntimeError(f"HF embedding request failed after retries: {last_err}")
 
                     def _encode_uncached(self, text: str) -> tuple:
-                        result = self._get_client().feature_extraction(
-                            text, model=self._model
-                        )
-                        arr = _np.array(result)
-                        if arr.ndim == 2:
+                        arr = _np.array(self._post(text))
+                        if arr.ndim == 2:  # token-level output — mean-pool
                             arr = arr.mean(axis=0)
                         return tuple(arr.tolist())
 
                     def embed_documents(self, texts):
-                        return [list(self._encode(t)) for t in texts]
+                        # The pipeline endpoint accepts batched inputs — one
+                        # HTTP call per 64 chunks instead of one per chunk.
+                        out = []
+                        for i in range(0, len(texts), 64):
+                            batch = list(texts[i:i + 64])
+                            arr = _np.array(self._post(batch))
+                            if arr.ndim == 3:      # (n, tokens, dim) — mean-pool
+                                arr = arr.mean(axis=1)
+                            elif arr.ndim == 1:    # single flat vector
+                                arr = arr.reshape(1, -1)
+                            out.extend(arr.tolist())
+                        return out
 
                     def embed_query(self, text: str):
                         return list(self._encode(text))
 
-                # HF's serverless inference (hf-inference provider) no longer
-                # serves sentence-transformers/all-MiniLM-L6-v2 — requests fail
-                # with "Model not supported by provider hf-inference".
-                # BAAI/bge-small-en-v1.5 is served, and is a drop-in 384-dim
-                # replacement. Note: indexes are only searchable with the same
-                # model that built them, so cloud indexes must be built in the
-                # cloud (uploads re-index there anyway).
+                # HF's hf-inference provider no longer serves
+                # sentence-transformers/all-MiniLM-L6-v2; BAAI/bge-small-en-v1.5
+                # is served and is a drop-in 384-dim replacement. Indexes are
+                # only searchable with the model that built them, so cloud
+                # indexes must be (re)built in the cloud.
                 embed_model_name = os.getenv("CLOUD_EMBED_MODEL", "BAAI/bge-small-en-v1.5")
                 embedding_model = _HFInferenceEmbeddings(
                     api_key=hf_api_key,
