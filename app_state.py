@@ -6,6 +6,8 @@ import os
 import time
 import logging
 import functools
+import threading
+from collections import OrderedDict
 from pathlib import Path
 from langchain_community.vectorstores import FAISS
 from langchain_core.embeddings import Embeddings as _LCEmbeddings
@@ -105,6 +107,27 @@ def get_system_state():
 def get_agent_manager():
     """Return the global AgentManager instance (or None if not ready)."""
     return agent_manager
+
+
+# ── Per-user conversation memory ──────────────────────────────────────────────
+# One EnhancedConversationContext per authenticated user, so conversation
+# history, remembered facts and notes are never shared across users.
+_user_contexts: "OrderedDict[str, EnhancedConversationContext]" = OrderedDict()
+_user_contexts_lock = threading.Lock()
+_MAX_USER_CONTEXTS = 500   # LRU cap — oldest idle users are evicted first
+
+def get_user_context_manager(user_id: str) -> EnhancedConversationContext:
+    """Return (creating if needed) the conversation context for one user."""
+    with _user_contexts_lock:
+        ctx = _user_contexts.get(user_id)
+        if ctx is None:
+            ctx = EnhancedConversationContext()
+            _user_contexts[user_id] = ctx
+        else:
+            _user_contexts.move_to_end(user_id)
+        while len(_user_contexts) > _MAX_USER_CONTEXTS:
+            _user_contexts.popitem(last=False)
+        return ctx
 
 def initialize_system():
     """Initialize the RAG system on startup"""

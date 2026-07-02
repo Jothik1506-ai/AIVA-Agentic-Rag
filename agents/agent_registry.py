@@ -50,10 +50,16 @@ def _save(agents: List[Dict]) -> None:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def list_agents(include_disabled: bool = True) -> List[Dict]:
+def list_agents(include_disabled: bool = True, owner_id: Optional[str] = None) -> List[Dict]:
+    """
+    List agents. When owner_id is given, only that user's agents are returned —
+    agents with no owner_id (created before per-user isolation) are hidden.
+    """
     agents = _load()
     if not include_disabled:
         agents = [a for a in agents if a.get("enabled", True)]
+    if owner_id is not None:
+        agents = [a for a in agents if a.get("owner_id") == owner_id]
     return agents
 
 
@@ -64,6 +70,14 @@ def get_agent(agent_id: str) -> Optional[Dict]:
     return None
 
 
+def get_agent_for_owner(agent_id: str, owner_id: str) -> Optional[Dict]:
+    """Fetch an agent only if it belongs to owner_id. Returns None otherwise."""
+    agent = get_agent(agent_id)
+    if agent is None or agent.get("owner_id") != owner_id:
+        return None
+    return agent
+
+
 def create_agent(
     name: str,
     description: str,
@@ -71,6 +85,7 @@ def create_agent(
     sources: List[Dict],          # [{"type": "file"|"url", "value": "..."}]
     refresh_hours: int = 24,
     enabled: bool = True,
+    owner_id: Optional[str] = None,
 ) -> Dict:
     """Create a new agent and persist it."""
     agents = _load()
@@ -88,6 +103,7 @@ def create_agent(
 
     agent = {
         "id": candidate,
+        "owner_id": owner_id,
         "name": name,
         "description": description,
         "keywords": [k.lower().strip() for k in keywords],
@@ -107,8 +123,9 @@ def update_agent(agent_id: str, updates: Dict) -> Optional[Dict]:
     agents = _load()
     for i, a in enumerate(agents):
         if a["id"] == agent_id:
-            # Protect id and created_at
+            # Protect id, ownership and created_at
             updates.pop("id", None)
+            updates.pop("owner_id", None)
             updates.pop("created_at", None)
             if "keywords" in updates:
                 updates["keywords"] = [k.lower().strip() for k in updates["keywords"]]

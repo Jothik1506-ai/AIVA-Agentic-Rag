@@ -115,6 +115,7 @@ class AgentManager:
         query: str,
         max_agents: int = 5,
         threshold: float = 0.15,
+        owner_id: Optional[str] = None,
     ) -> Tuple[str, List[Dict]]:
         """
         Main entry point called from chat_routes.
@@ -126,7 +127,7 @@ class AgentManager:
             agent_metadata_list   — list of {agent_id, agent_name, source, score}
                                     for transparency / source attribution.
         """
-        enabled_agents = list_agents(include_disabled=False)
+        enabled_agents = list_agents(include_disabled=False, owner_id=owner_id)
         if not enabled_agents:
             return "", []
 
@@ -251,10 +252,12 @@ class AgentManager:
         query: str,
         k: int = 10,
         filter_files: Optional[List[str]] = None,
+        owner_id: Optional[str] = None,
     ) -> tuple[str, List[Dict]]:
         """
         Search a single notebook (agent) by ID — bypasses routing.
         Called when the user has explicitly selected a notebook in the UI.
+        When owner_id is given, the notebook must belong to that user.
 
         Returns:
             (context_str, meta_list)
@@ -262,6 +265,8 @@ class AgentManager:
         from agents.agent_indexer import agent_is_indexed
         agent = get_agent(agent_id)
         if agent is None:
+            return "", []
+        if owner_id is not None and agent.get("owner_id") != owner_id:
             return "", []
 
         if not agent_is_indexed(agent_id):
@@ -303,10 +308,10 @@ class AgentManager:
         )
         return context, meta_list
 
-    def get_routing_debug(self, query: str) -> List[Dict]:
+    def get_routing_debug(self, query: str, owner_id: Optional[str] = None) -> List[Dict]:
         """Return routing explanation for admin debug view."""
         from agents.query_router import explain_routing
-        enabled = list_agents(include_disabled=False)
+        enabled = list_agents(include_disabled=False, owner_id=owner_id)
         return explain_routing(query, enabled, self.embedding_model)
 
     def status(self) -> Dict:

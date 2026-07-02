@@ -228,7 +228,7 @@ def add_cors_headers(response):
     if origin in _ALLOWED_ORIGINS or is_same_origin:
         response.headers['Access-Control-Allow-Origin'] = origin
         response.headers['Access-Control-Allow-Credentials'] = 'true'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization,X-User-Id'
         response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
         response.headers['Vary'] = 'Origin'
     return response

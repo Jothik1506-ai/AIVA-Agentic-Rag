@@ -22,9 +22,9 @@ import logging
 from pathlib import Path
 from flask import Blueprint, jsonify, request
 
-from modules.auth import require_login
+from modules.auth import require_login, get_current_user_id
 from agents.agent_registry import (
-    list_agents, get_agent, create_agent, update_agent,
+    list_agents, get_agent, get_agent_for_owner, create_agent, update_agent,
     delete_agent, set_enabled
 )
 from agents.agent_indexer import agent_is_indexed, read_index_status
@@ -45,12 +45,21 @@ def _mgr():
     return mgr, None, None
 
 
+def _owned_agent(agent_id):
+    """Fetch an agent only if it belongs to the requesting user.
+
+    Returns None for both nonexistent and foreign agents so responses don't
+    reveal whether another user's notebook id exists.
+    """
+    return get_agent_for_owner(agent_id, get_current_user_id())
+
+
 # ── List / Create ─────────────────────────────────────────────────────────────
 
 @agent_bp.route("", methods=["GET"])
 @require_login
 def list_all_agents():
-    agents = list_agents(include_disabled=True)
+    agents = list_agents(include_disabled=True, owner_id=get_current_user_id())
     result = []
     for a in agents:
         idx = read_index_status(a["id"])
@@ -88,6 +97,7 @@ def create_new_agent():
         sources=sources,
         refresh_hours=refresh_h,
         enabled=enabled,
+        owner_id=get_current_user_id(),
     )
 
     # Kick off async indexing if sources provided
@@ -104,7 +114,7 @@ def create_new_agent():
 @agent_bp.route("/<agent_id>", methods=["GET"])
 @require_login
 def get_one_agent(agent_id):
-    agent = get_agent(agent_id)
+    agent = _owned_agent(agent_id)
     if not agent:
         return jsonify({"error": "Agent not found"}), 404
     return jsonify({"agent": {**agent, "is_indexed": agent_is_indexed(agent_id)}})
@@ -113,6 +123,8 @@ def get_one_agent(agent_id):
 @agent_bp.route("/<agent_id>", methods=["PUT"])
 @require_login
 def update_one_agent(agent_id):
+    if not _owned_agent(agent_id):
+        return jsonify({"error": "Agent not found"}), 404
     data = request.get_json(silent=True) or {}
     updated = update_agent(agent_id, data)
     if not updated:
@@ -130,6 +142,8 @@ def update_one_agent(agent_id):
 @agent_bp.route("/<agent_id>", methods=["DELETE"])
 @require_login
 def delete_one_agent(agent_id):
+    if not _owned_agent(agent_id):
+        return jsonify({"error": "Agent not found"}), 404
     ok = delete_agent(agent_id)
     if not ok:
         return jsonify({"error": "Agent not found"}), 404
@@ -141,6 +155,8 @@ def delete_one_agent(agent_id):
 @agent_bp.route("/<agent_id>/enable", methods=["POST"])
 @require_login
 def enable_agent(agent_id):
+    if not _owned_agent(agent_id):
+        return jsonify({"error": "Agent not found"}), 404
     updated = set_enabled(agent_id, True)
     if not updated:
         return jsonify({"error": "Agent not found"}), 404
@@ -150,6 +166,8 @@ def enable_agent(agent_id):
 @agent_bp.route("/<agent_id>/disable", methods=["POST"])
 @require_login
 def disable_agent(agent_id):
+    if not _owned_agent(agent_id):
+        return jsonify({"error": "Agent not found"}), 404
     updated = set_enabled(agent_id, False)
     if not updated:
         return jsonify({"error": "Agent not found"}), 404
@@ -161,7 +179,7 @@ def disable_agent(agent_id):
 @agent_bp.route("/<agent_id>/index", methods=["POST"])
 @require_login
 def reindex_agent(agent_id):
-    agent = get_agent(agent_id)
+    agent = _owned_agent(agent_id)
     if not agent:
         return jsonify({"error": "Agent not found"}), 404
 
@@ -179,7 +197,7 @@ def reindex_agent(agent_id):
 @agent_bp.route("/<agent_id>/status", methods=["GET"])
 @require_login
 def agent_status(agent_id):
-    agent = get_agent(agent_id)
+    agent = _owned_agent(agent_id)
     if not agent:
         return jsonify({"error": "Agent not found"}), 404
     idx_status = read_index_status(agent_id)
@@ -199,7 +217,7 @@ def agent_status(agent_id):
 @require_login
 def index_status_fast(agent_id):
     """Lightweight endpoint polled by the UI to check indexing progress."""
-    agent = get_agent(agent_id)
+    agent = _owned_agent(agent_id)
     if not agent:
         return jsonify({"error": "Agent not found"}), 404
     idx = read_index_status(agent_id)
@@ -220,7 +238,7 @@ def upload_source_file(agent_id):
     Upload a file (PDF, TXT, CSV, MD) and add it as a source for this agent.
     The file is saved to agent_uploads/<agent_id>/ and the source entry is added.
     """
-    agent = get_agent(agent_id)
+    agent = _owned_agent(agent_id)
     if not agent:
         return jsonify({"error": "Agent not found"}), 404
 
@@ -287,7 +305,7 @@ def upload_source_file(agent_id):
 @require_login
 def read_source_file(agent_id, src_idx):
     """Read the content of an agent source file for in-place editing."""
-    agent = get_agent(agent_id)
+    agent = _owned_agent(agent_id)
     if not agent:
         return jsonify({"error": "Agent not found"}), 404
     sources = agent.get("sources", [])
@@ -318,7 +336,7 @@ def read_source_file(agent_id, src_idx):
 @require_login
 def save_source_file(agent_id, src_idx):
     """Save edited content back to an agent source file and re-index."""
-    agent = get_agent(agent_id)
+    agent = _owned_agent(agent_id)
     if not agent:
         return jsonify({"error": "Agent not found"}), 404
     sources = agent.get("sources", [])
@@ -377,5 +395,5 @@ def debug_routing():
     if not mgr:
         return jsonify({"error": "Agent manager not ready"}), 503
 
-    explanation = mgr.get_routing_debug(query)
+    explanation = mgr.get_routing_debug(query, owner_id=get_current_user_id())
     return jsonify({"query": query, "routing": explanation})

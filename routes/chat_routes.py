@@ -753,8 +753,8 @@ from modules.utils import (
     is_query_about_documents,
     is_referential_query
 )
-from modules.auth import require_login
-from app_state import get_system_state, get_active_llm
+from modules.auth import require_login, get_current_user_id
+from app_state import get_system_state, get_active_llm, get_user_context_manager
 from config import PAGE_SPECIFIC_TEMPLATE, config as app_config
 
 # Agentic RAG components (imported lazily so missing deps don't crash the app)
@@ -797,6 +797,8 @@ def get_managers_and_llm():
         logger.warning("Chat request while system not initialized: %s", msg)
         return None, None, None, msg
     active_llm, _ = get_active_llm()
+    # Per-user conversation memory: never hand out the shared global context.
+    context_manager = get_user_context_manager(get_current_user_id())
     return doc_manager, context_manager, active_llm, None
 
 
@@ -1631,9 +1633,14 @@ Answer:"""
 def _notebook_chat(notebook_id: str, user_message: str, context_manager, llm, data: dict):
     """Handle a chat request scoped to a specific notebook (agent)."""
     from app_state import get_agent_manager
-    from agents.agent_registry import get_agent
+    from agents.agent_registry import get_agent_for_owner
+    from modules.auth import get_current_user_id
 
-    agent = get_agent(notebook_id)
+    # Ownership check: a user can only chat with their own notebooks.
+    # Foreign and nonexistent notebooks both return 404 so notebook ids
+    # belonging to other users cannot be probed.
+    user_id = get_current_user_id()
+    agent = get_agent_for_owner(notebook_id, user_id)
     if agent is None:
         return jsonify({'error': 'Notebook not found'}), 404
 
@@ -1651,7 +1658,7 @@ def _notebook_chat(notebook_id: str, user_message: str, context_manager, llm, da
     selected_files = data.get('selected_files', None)
     print(f"DEBUG: _notebook_chat received selected_files: {selected_files}")
     try:
-        context_str, meta_list = mgr.search_notebook(notebook_id, user_message, k=10, filter_files=selected_files)
+        context_str, meta_list = mgr.search_notebook(notebook_id, user_message, k=10, filter_files=selected_files, owner_id=user_id)
     except Exception as search_err:
         # Distinguish a broken search (e.g. embedding API failure) from an
         # empty notebook — otherwise the user sees a misleading "no indexed
