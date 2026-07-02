@@ -93,19 +93,29 @@ Session(app)
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint that shows system status without requiring login"""
-    from app_state import system_initialized, initialization_error, get_active_llm
-    if system_initialized:
+    import app_state
+    from app_state import get_active_llm
+    version = os.environ.get('RENDER_GIT_COMMIT', 'local')[:9]
+    if app_state.system_initialized:
         try:
             _, backend = get_active_llm()
         except Exception:
             backend = "none"
-        return jsonify({'status': 'healthy', 'initialized': True, 'llm_backend': backend})
+        embed_model = getattr(app_state.embedding_model, '_model', None) or 'local'
+        return jsonify({
+            'status': 'healthy',
+            'initialized': True,
+            'llm_backend': backend,
+            'embed_model': embed_model,
+            'version': version,
+        })
     else:
-        err = initialization_error or "System is still starting up, please wait…"
+        err = app_state.initialization_error or "System is still starting up, please wait…"
         return jsonify({
             'status': 'initializing',
             'initialized': False,
-            'error': err
+            'error': err,
+            'version': version,
         }), 503
 
 # -------------------------------------------------------
