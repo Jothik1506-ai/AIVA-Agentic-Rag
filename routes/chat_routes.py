@@ -1674,8 +1674,12 @@ def _react_agent_chat(user_message: str, doc_manager, context_manager, data: dic
 # ==============
 
 _NOTEBOOK_PROMPT = """\
-You are AIVA, an intelligent assistant. Answer the question below using ONLY the \
-context retrieved from the notebook "{notebook_name}". \
+You are AIVA, an intelligent assistant. The user is chatting with their notebook \
+named "{notebook_name}", which contains these source files: {files}. \
+If the user refers to the notebook by a similar name, they mean this notebook. \
+Answer the question below using ONLY the context retrieved from the notebook. \
+If the user asks what the notebook contains or what is inside it, describe the \
+files and the topics covered in the context. \
 If the answer is not found in the context, say so clearly — do not guess.
 
 {context}
@@ -1683,6 +1687,24 @@ If the answer is not found in the context, say so clearly — do not guess.
 Question: {question}
 
 Answer:"""
+
+# Short greetings / pleasantries — answered directly, no retrieval needed
+_NB_GREETING_RE = re.compile(
+    r"^(hi+|hii+|hello+|hey+|yo|hola|good\s+(morning|afternoon|evening)|"
+    r"how\s+are\s+you|thanks?(\s+you)?|thank\s+you|ok(ay)?|bye|good\s*night)[\s!.?]*$",
+    re.IGNORECASE,
+)
+
+# Questions about the notebook itself ("what is inside test 1", "list the files")
+_NB_META_RE = re.compile(
+    r"(what(?:'s|\s+is)?\s+(?:there\s+)?(?:inside|in)\b"
+    r"|contents?\s+of"
+    r"|what\s+.*\bcontain"
+    r"|list\s+(?:the\s+)?(files|sources|documents)"
+    r"|what\s+do(?:es)?\s+(?:this|the|it|you)\b.*\b(have|know|contain)"
+    r"|summar(?:y|ise|ize))",
+    re.IGNORECASE,
+)
 
 
 def _notebook_chat(notebook_id: str, user_message: str, context_manager, llm, data: dict):
@@ -1710,10 +1732,49 @@ def _notebook_chat(notebook_id: str, user_message: str, context_manager, llm, da
     if isinstance(stream_requested, str):
         stream_requested = stream_requested.lower() in ['true', '1', 'yes']
 
+    # Human-readable list of this notebook's source files
+    from pathlib import Path as _P
+    nb_files = []
+    for s in agent.get('sources', []):
+        v = str(s.get('value', ''))
+        nb_files.append(_P(v).name if s.get('type') == 'file' else v)
+    files_str = ', '.join(nb_files) if nb_files else '(no files yet)'
+
+    def _direct_reply(msg, qtype='notebook_info'):
+        """Answer without retrieval/LLM — used for greetings and meta questions."""
+        if stream_requested:
+            def _s():
+                yield f"data: {json.dumps({'type': 'token', 'content': msg})}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'sources': [], 'processing_time': 0.0, 'images': [], 'blocks': [{'type':'text','content':msg}]})}\n\n"
+            return Response(stream_with_context(_s()), headers={
+                'Cache-Control': 'no-cache', 'Content-Type': 'text/event-stream', 'X-Accel-Buffering': 'no'
+            })
+        return jsonify({'response': msg, 'query_type': qtype, 'sources': [],
+                        'processing_time': 0.0, 'images': [],
+                        'blocks': [{'type': 'text', 'content': msg}]})
+
+    # Greetings should never hit vector search — previously they retrieved
+    # irrelevant chunks and the LLM replied "not found in the provided context".
+    if _NB_GREETING_RE.match(user_message.strip()):
+        n = len(nb_files)
+        greeting = (
+            f'Hello! 👋 You are chatting with the notebook **{agent["name"]}** '
+            f'({n} source file{"s" if n != 1 else ""}: {files_str}). '
+            'Ask me anything about its content!'
+        )
+        return _direct_reply(greeting, qtype='notebook_greeting')
+
+    # Questions about the notebook itself ("what is inside test 1?") retrieve
+    # poorly with the literal query — search for an overview instead, and the
+    # prompt (which knows the notebook name + files) answers from that.
+    search_query = user_message
+    if _NB_META_RE.search(user_message) or agent['name'].lower() in user_message.lower():
+        search_query = 'overview of the main topics, sections and key points of the document'
+
     selected_files = data.get('selected_files', None)
     print(f"DEBUG: _notebook_chat received selected_files: {selected_files}")
     try:
-        context_str, meta_list = mgr.search_notebook(notebook_id, user_message, k=10, filter_files=selected_files, owner_id=user_id)
+        context_str, meta_list = mgr.search_notebook(notebook_id, search_query, k=10, filter_files=selected_files, owner_id=user_id)
     except Exception as search_err:
         # Distinguish a broken search (e.g. embedding API failure) from an
         # empty notebook — otherwise the user sees a misleading "no indexed
@@ -1750,6 +1811,7 @@ def _notebook_chat(notebook_id: str, user_message: str, context_manager, llm, da
     safe_notebook_name = re.sub(r'[^\w\s\-]', '', agent.get('name', ''))[:100]
     prompt = _NOTEBOOK_PROMPT.format(
         notebook_name=safe_notebook_name,
+        files=files_str[:500],
         context=context_str,
         question=user_message,
     )
