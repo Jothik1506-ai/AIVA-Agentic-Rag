@@ -92,7 +92,25 @@
     min-height: 22px; margin-top: 18px; text-align: center;
     color: #ff8f9f; font-size: 14px;
   }
-  .google-wrap { margin-top: 26px; display: flex; justify-content: center; }
+  .divider {
+    display: flex; align-items: center; gap: 14px;
+    margin: 26px auto 0; max-width: 360px;
+    color: #9aa3b2; font-size: 13px;
+  }
+  .divider::before, .divider::after {
+    content: ""; flex: 1; height: 1px; background: rgba(217,217,217,.25);
+  }
+  .google-wrap { margin-top: 20px; display: flex; justify-content: center; }
+  .btn-google {
+    display: inline-flex; align-items: center; gap: 12px;
+    background: #d9d9d9; color: #10141d;
+    border: none; cursor: pointer; border-radius: 999px;
+    font-family: inherit; font-size: 16px; font-weight: 500;
+    padding: 12px 32px;
+    transition: transform .12s ease, box-shadow .12s ease;
+  }
+  .btn-google:hover { transform: translateY(-1px); box-shadow: 0 8px 22px rgba(76,196,224,.25); }
+  .btn-google svg { width: 20px; height: 20px; }
 
   @media (max-width: 640px) {
     .frame { border-radius: 32px; padding: 18px; }
@@ -151,16 +169,23 @@
             <br/>
             <button class="switch" id="modeSwitch" type="button">Create an account</button>
             <div class="error" id="errorBox" role="alert"></div>
-            {% if google_client_id %}
+
+            <div class="divider">or</div>
             <div class="google-wrap">
+              {% if google_client_id %}
               <div id="g_id_onload"
                    data-client_id="{{ google_client_id }}"
                    data-callback="onGoogleCredential"
                    data-auto_prompt="false"></div>
               <div class="g_id_signin" data-type="standard" data-theme="filled_black"
                    data-text="continue_with" data-shape="pill"></div>
+              {% else %}
+              <button type="button" class="btn-google" id="googleFallback">
+                <svg viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.2C12.4 13.4 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.7 6c4.5-4.2 6.9-10.3 6.9-17.7z"/><path fill="#FBBC05" d="M10.5 28.6c-.5-1.5-.8-3-.8-4.6s.3-3.1.8-4.6l-7.9-6.2C.9 16.5 0 20.1 0 24s.9 7.5 2.6 10.8l7.9-6.2z"/><path fill="#34A853" d="M24 48c6.3 0 11.6-2.1 15.5-5.7l-7.7-6c-2.1 1.4-4.8 2.3-7.8 2.3-6.3 0-11.6-3.9-13.5-9.4l-7.9 6.2C6.5 42.6 14.6 48 24 48z"/></svg>
+                Continue with Google
+              </button>
+              {% endif %}
             </div>
-            {% endif %}
           </div>
         </form>
       </div>
@@ -215,7 +240,16 @@
     }
   });
 
-  // Google Sign-In callback (rendered only when GOOGLE_CLIENT_ID is set)
+  // Placeholder button shown until GOOGLE_CLIENT_ID is configured on the server
+  const gFallback = document.getElementById('googleFallback');
+  if (gFallback) {
+    gFallback.addEventListener('click', () => {
+      errorBox.textContent =
+        'Google Sign-In is not configured yet (server needs GOOGLE_CLIENT_ID). Use username & password for now.';
+    });
+  }
+
+  // Google Sign-In callback (active when GOOGLE_CLIENT_ID is set)
   window.onGoogleCredential = async (response) => {
     errorBox.textContent = '';
     try {
