@@ -782,10 +782,12 @@ def get_managers_and_llm():
     state_data = get_system_state()
     system_initialized, initialization_error, doc_manager, context_manager, _, _, _ = state_data
     if not system_initialized and not initialization_error:
-        # Wait up to 90 s for the background init thread to finish
-        deadline = _t.time() + 90
+        # Give the background init thread a brief chance to finish, but never
+        # hold the request thread for long — with 1 worker × 2 threads, a long
+        # wait here blocks half the server's capacity (including health checks).
+        deadline = _t.time() + 2
         while _t.time() < deadline:
-            _t.sleep(1)
+            _t.sleep(0.5)
             state_data = get_system_state()
             system_initialized, initialization_error, doc_manager, context_manager, _, _, _ = state_data
             if system_initialized or initialization_error:
@@ -824,6 +826,19 @@ def _llm_invoke(prompt):
         raise
 
 
+def _chunk_to_text(chunk) -> str:
+    """Extract plain text from a streamed LLM chunk (AIMessageChunk or str)."""
+    content = getattr(chunk, 'content', None)
+    if content is None:
+        return str(chunk)
+    if isinstance(content, list):  # some providers stream content blocks
+        return "".join(
+            part.get('text', '') if isinstance(part, dict) else str(part)
+            for part in content
+        )
+    return content
+
+
 def _llm_stream(prompt):
     """Stream LLM with automatic LM Studio → Groq fallback. Yields (chunk_str, backend)."""
     active_llm, backend = get_active_llm()
@@ -831,7 +846,7 @@ def _llm_stream(prompt):
         raise RuntimeError("No LLM available (LM Studio offline and Groq not configured).")
     try:
         for chunk in active_llm.stream(prompt):
-            yield str(chunk), backend
+            yield _chunk_to_text(chunk), backend
     except Exception as primary_err:
         if "connect" in str(primary_err).lower() or "timeout" in str(primary_err).lower():
             import app_state as _as
@@ -846,7 +861,7 @@ def _llm_stream(prompt):
                         max_tokens=app_config.LM_STUDIO_MAX_TOKENS,
                     )
                 for chunk in _as._groq_llm.stream(prompt):
-                    yield str(chunk), "groq"
+                    yield _chunk_to_text(chunk), "groq"
                 return
         raise
 

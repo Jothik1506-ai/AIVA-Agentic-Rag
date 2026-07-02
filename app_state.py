@@ -3,13 +3,24 @@ Application state management.
 This module holds the global application state to avoid circular imports.
 """
 import os
+import time
 import logging
+import functools
 from pathlib import Path
 from langchain_community.vectorstores import FAISS
 from langchain_openai import ChatOpenAI
 from modules.document_manager import AdvancedDocumentManager
 from modules.conversation import EnhancedConversationContext
 from config import config as app_config
+
+# Imported at module level (not inside the init thread) — importing heavy
+# packages from a daemon thread during worker startup can wedge on the
+# import lock and leave the system stuck in "initializing" forever.
+try:
+    from huggingface_hub import InferenceClient as _IClient
+except ImportError:
+    _IClient = None
+import numpy as _np
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +39,10 @@ agent_manager = None          # ← Stage 2: AIVA Agent Manager
 
 def _lm_studio_healthy() -> bool:
     """Ping LM Studio with a 2-second timeout. Returns True if reachable."""
+    # On Render (cloud) LM Studio can never be reachable at 127.0.0.1 —
+    # skip the probe entirely and go straight to the Groq fallback.
+    if os.environ.get('RENDER'):
+        return False
     try:
         import urllib.request
         url = f"{app_config.LM_STUDIO_BASE_URL.rstrip('/')}/v1/models"
@@ -98,18 +113,22 @@ def initialize_system():
     global system_initialized, initialization_error, doc_manager, context_manager, embedding_model, llm, streaming_callback, agent_manager
     
     try:
-        print("Initializing RAG system...")
-        
+        init_t0 = time.time()
+
+        def _step_log(msg: str):
+            print(f"[init +{time.time() - init_t0:.1f}s] {msg}", flush=True)
+
+        _step_log("Initializing RAG system...")
+
         # Initialize embedding model
         # Cloud (Render): uses HuggingFace Inference API — no torch/local model needed
         # Local (PC):     uses HuggingFaceEmbeddings with local sentence-transformers
         hf_api_key = getattr(app_config, "HF_API_KEY", "") or os.getenv("HF_API_KEY", "")
         if hf_api_key:
-            print("⏳ Step 1/4: HuggingFace Inference API embeddings (cloud mode)...")
+            _step_log("Step 1/4: HuggingFace Inference API embeddings (cloud mode)...")
+            if _IClient is None:
+                raise Exception("huggingface_hub is not installed — cannot use Inference API embeddings")
             try:
-                from huggingface_hub import InferenceClient as _IClient
-                import numpy as _np
-
                 # Plain class — no langchain abstract base needed, FAISS uses duck-typing
                 # Client is created lazily on first use to avoid blocking during startup.
                 class _HFInferenceEmbeddings:
@@ -117,37 +136,40 @@ def initialize_system():
                         self._api_key = api_key
                         self._model = model
                         self._client = None  # created on first call
+                        # Each embed is a remote HTTP call; the same query is embedded
+                        # once per document per agentic iteration, so cache by text.
+                        self._encode = functools.lru_cache(maxsize=512)(self._encode_uncached)
 
                     def _get_client(self):
                         if self._client is None:
                             self._client = _IClient(token=self._api_key)
                         return self._client
 
-                    def _encode(self, text: str) -> list:
+                    def _encode_uncached(self, text: str) -> tuple:
                         result = self._get_client().feature_extraction(
                             text, model=self._model
                         )
                         arr = _np.array(result)
                         if arr.ndim == 2:
                             arr = arr.mean(axis=0)
-                        return arr.tolist()
+                        return tuple(arr.tolist())
 
                     def embed_documents(self, texts):
-                        return [self._encode(t) for t in texts]
+                        return [list(self._encode(t)) for t in texts]
 
                     def embed_query(self, text: str):
-                        return self._encode(text)
+                        return list(self._encode(text))
 
                 embed_model_name = app_config.EMBED_MODEL_OPTIONS[0]
                 embedding_model = _HFInferenceEmbeddings(
                     api_key=hf_api_key,
                     model=embed_model_name,
                 )
-                print(f"✅ Embedding model (API): {embed_model_name}")
+                _step_log(f"✅ Embedding model (API): {embed_model_name}")
             except Exception as e:
                 raise Exception(f"HuggingFace Inference API embedding failed: {e}")
         else:
-            print(f"💻 Loading local embedding model on {app_config.DEVICE}...")
+            _step_log(f"Step 1/4: loading local embedding model on {app_config.DEVICE}...")
             try:
                 from langchain_huggingface import HuggingFaceEmbeddings
                 embedding_model = HuggingFaceEmbeddings(
@@ -169,7 +191,7 @@ def initialize_system():
                     raise Exception(f"Failed to load any embedding model: {e2}")
         
         # Initialize LLM via LM Studio's OpenAI-compatible endpoint
-        print("⏳ Step 2/4: Initializing language model...")
+        _step_log("Step 2/4: Initializing language model...")
         try:
             lm_studio_base_url = os.getenv("LM_STUDIO_BASE_URL", "http://localhost:1234")
             llm_base_url = f"{lm_studio_base_url.rstrip('/')}/v1"
@@ -182,22 +204,21 @@ def initialize_system():
                 max_tokens=getattr(app_config, "LM_STUDIO_MAX_TOKENS", 2048),
             )
 
-            print(f"✅ LLM client created: {app_config.LLM_MODEL}")
+            _step_log(f"✅ LLM client created: {app_config.LLM_MODEL}")
 
         except Exception as e:
-            print(f"⚠️  LLM init skipped (will use Groq fallback): {e}")
+            _step_log(f"⚠️  LLM init skipped (will use Groq fallback): {e}")
             llm = None
 
         # Initialize managers
-        print("⏳ Step 3/4: Creating document manager...")
+        _step_log("Step 3/4: Creating document manager...")
         os.makedirs(app_config.EMBEDDINGS_DIR, exist_ok=True)
         doc_manager = AdvancedDocumentManager(app_config.EMBEDDINGS_DIR, embedding_model=embedding_model)
         context_manager = EnhancedConversationContext()
 
         # Load documents — short timeout so init doesn't hang on empty dir
-        print("⏳ Step 4/4: Loading documents...")
+        _step_log("Step 4/4: Loading documents...")
         from threading import Thread
-        import time
 
         def _load_docs():
             try:
@@ -210,10 +231,10 @@ def initialize_system():
         doc_thread.join(timeout=10)  # 10 s max — empty dir returns instantly
 
         if doc_thread.is_alive():
-            print("⚠️  Document loading taking >10s, continuing in background")
-        
+            _step_log("⚠️  Document loading taking >10s, continuing in background")
+
         system_initialized = True
-        print("✅ System initialization complete")
+        _step_log("✅ System initialization complete")
 
         # ── Stage 2: Start AIVA Agent Manager & scheduler ──────────────────
         try:
@@ -221,13 +242,13 @@ def initialize_system():
             from agents.scheduler import start_scheduler
             agent_manager = AgentManager(embedding_model)
             start_scheduler(agent_manager)
-            print("✅ Agent Manager started (Stage 2 active)")
+            print("✅ Agent Manager started (Stage 2 active)", flush=True)
         except Exception as e:
-            print(f"⚠️  Agent Manager failed to start: {e}")
+            print(f"⚠️  Agent Manager failed to start: {e}", flush=True)
             agent_manager = None
-        
+
     except Exception as e:
         system_initialized = False
         initialization_error = str(e)
-        print(f"❌ Error initializing system: {e}")
+        print(f"❌ Error initializing system: {e}", flush=True)
         raise

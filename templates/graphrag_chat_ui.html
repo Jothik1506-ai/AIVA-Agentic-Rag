@@ -1672,7 +1672,7 @@ async function send() {
   try {
     const body = {
       message:     text,
-      stream:      false,
+      stream:      true,
       search_mode: activeNbId ? 'documents_only' : document.getElementById('searchMode')?.value || 'general_plus_docs',
     };
     if (activeNbId) {
@@ -1695,27 +1695,85 @@ async function send() {
       headers: {'Content-Type': 'application/json'},
       body:    JSON.stringify(body),
     });
-    hideTyping();
 
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
       throw new Error(err.message || err.error || `HTTP ${r.status}`);
     }
 
-    const data    = await r.json();
-    const sources = (data.sources || [])
-      .map(s => s.document_title || s.source_document || s.agent_name || s.document || '')
-      .filter(Boolean);
+    const ctype = r.headers.get('Content-Type') || '';
+    if (!ctype.includes('text/event-stream')) {
+      // Backend answered with plain JSON (casual replies, commands,
+      // "system starting" notices, some error paths) — render as before.
+      const data    = await r.json();
+      hideTyping();
+      const sources = (data.sources || [])
+        .map(s => s.document_title || s.source_document || s.agent_name || s.document || '')
+        .filter(Boolean);
+      appendMsg('ai', mdToHtml(data.response || 'No response.'), sources);
+      return;
+    }
 
-    appendMsg('ai', mdToHtml(data.response || 'No response.'), sources);
+    // ── SSE stream: render tokens as they arrive ──
+    const reader  = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '', fullText = '', bubble = null, sources = [];
+
+    const handleEvent = (obj) => {
+      if (obj.type === 'token' && obj.content) {
+        if (!bubble) { hideTyping(); bubble = appendMsg('ai', ''); }
+        fullText += obj.content;
+        bubble.innerHTML = mdToHtml(fullText);
+        scrollMsgs();
+      } else if (obj.type === 'done') {
+        sources = (obj.sources || [])
+          .map(s => s.document_title || s.source_document || s.agent_name || s.document || '')
+          .filter(Boolean);
+      } else if (obj.type === 'error') {
+        throw new Error(obj.message || 'Stream error');
+      }
+      // 'status' and 'images' events are informational — ignored here.
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) !== -1) {
+        const raw = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const line = raw.split('\n').find(l => l.startsWith('data: '));
+        if (!line) continue;               // ": ping" comments
+        let obj;
+        try { obj = JSON.parse(line.slice(6)); } catch { continue; }
+        handleEvent(obj);
+      }
+    }
+
+    hideTyping();
+    if (!bubble) {
+      appendMsg('ai', mdToHtml(fullText || 'No response.'), sources);
+    } else if (sources.length > 0) {
+      const bar = document.createElement('div');
+      bar.className = 'src-tags';
+      [...new Set(sources)].slice(0,4).forEach(s => {
+        const t = document.createElement('span');
+        t.className = 'src-tag';
+        t.textContent = s;
+        bar.appendChild(t);
+      });
+      bubble.appendChild(bar);
+      scrollMsgs();
+    }
   } catch(ex) {
     hideTyping();
     appendMsg('ai', `⚠️ ${esc(ex.message)}`);
+  } finally {
+    waiting = false;
+    document.getElementById('sendBtn').disabled = false;
+    document.getElementById('chatInput').focus();
   }
-
-  waiting = false;
-  document.getElementById('sendBtn').disabled = false;
-  document.getElementById('chatInput').focus();
 }
 
 // ─────────────────────────────────────────────

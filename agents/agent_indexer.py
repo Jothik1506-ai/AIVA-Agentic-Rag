@@ -12,6 +12,7 @@ import os
 import json
 import time
 import logging
+import threading
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 
@@ -379,6 +380,13 @@ def index_agent(agent: Dict, embedding_model) -> bool:
 
 # ── Load / search ─────────────────────────────────────────────────────────────
 
+# Cache of loaded FAISS vectorstores: {agent_id: (index_mtime, vectorstore)}.
+# Deserializing the index from disk on every request adds needless latency;
+# the mtime key invalidates the cache whenever the index is rebuilt.
+_LOADED_INDEX_CACHE: dict = {}
+_LOADED_INDEX_LOCK = threading.Lock()
+
+
 def load_agent_index(agent_id: str, embedding_model):
     """Load the FAISS vectorstore for an agent. Returns None if not indexed yet."""
     try:
@@ -386,8 +394,20 @@ def load_agent_index(agent_id: str, embedding_model):
         faiss_path = _agent_index_dir(agent_id) / "faiss_index"
         if not faiss_path.exists():
             return None
+
+        mtime = (faiss_path / "index.faiss").stat().st_mtime
+
+        with _LOADED_INDEX_LOCK:
+            cached = _LOADED_INDEX_CACHE.get(agent_id)
+            if cached and cached[0] == mtime:
+                return cached[1]
+
         from modules.document_manager import _safe_faiss_load
-        return _safe_faiss_load(FAISS, str(faiss_path), embedding_model, str(INDEXES_DIR))
+        vs = _safe_faiss_load(FAISS, str(faiss_path), embedding_model, str(INDEXES_DIR))
+
+        with _LOADED_INDEX_LOCK:
+            _LOADED_INDEX_CACHE[agent_id] = (mtime, vs)
+        return vs
     except Exception as e:
         logger.warning(f"[indexer] Could not load index for '{agent_id}': {e}")
         return None
