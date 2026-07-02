@@ -1650,7 +1650,22 @@ def _notebook_chat(notebook_id: str, user_message: str, context_manager, llm, da
 
     selected_files = data.get('selected_files', None)
     print(f"DEBUG: _notebook_chat received selected_files: {selected_files}")
-    context_str, meta_list = mgr.search_notebook(notebook_id, user_message, k=10, filter_files=selected_files)
+    try:
+        context_str, meta_list = mgr.search_notebook(notebook_id, user_message, k=10, filter_files=selected_files)
+    except Exception as search_err:
+        # Distinguish a broken search (e.g. embedding API failure) from an
+        # empty notebook — otherwise the user sees a misleading "no indexed
+        # content" message while the real error only lives in server logs.
+        logger.error(f"Notebook search failed for '{notebook_id}': {search_err}\n{traceback.format_exc()}")
+        err_msg = f"Notebook search failed: {search_err}"
+        if stream_requested:
+            def _err_stream():
+                yield f"data: {json.dumps({'type': 'error', 'message': err_msg})}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'sources': [], 'processing_time': 0.0, 'images': [], 'blocks': []})}\n\n"
+            return Response(stream_with_context(_err_stream()), headers={
+                'Cache-Control': 'no-cache', 'Content-Type': 'text/event-stream', 'X-Accel-Buffering': 'no'
+            })
+        return jsonify({'error': err_msg, 'message': err_msg}), 502
 
     if not context_str:
         no_ctx = (

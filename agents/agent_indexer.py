@@ -423,8 +423,15 @@ def search_agent_index(
     embedding_model,
     k: int = 6,
     filter_files: Optional[List[str]] = None,
+    raise_errors: bool = False,
 ) -> List[Dict]:
-    """Search a single agent's FAISS index. Returns list of {text, source, score}."""
+    """Search a single agent's FAISS index. Returns list of {text, source, score}.
+
+    With raise_errors=False (default), search failures are logged and return []
+    — appropriate for multi-agent routing where one bad agent shouldn't kill
+    the query. Pass raise_errors=True when the caller needs to distinguish
+    "no content" from "search failed" (e.g. embedding API errors).
+    """
     logger.debug("search_agent_index called with filter_files: %s", filter_files)
     if filter_files is not None and len(filter_files) == 0:
         logger.debug("filter_files is empty list, returning empty results immediately")
@@ -458,4 +465,6 @@ def search_agent_index(
         ]
     except Exception as e:
         logger.warning(f"[indexer] Search error for agent '{agent_id}': {e}")
+        if raise_errors:
+            raise
         return []

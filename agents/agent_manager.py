@@ -269,7 +269,10 @@ class AgentManager:
             logger.info(f"[AgentManager] Notebook '{agent_id}' not indexed yet — indexing triggered.")
             return "", []
 
-        chunks = search_agent_index(agent_id, query, self.embedding_model, k=k, filter_files=filter_files)
+        chunks = search_agent_index(
+            agent_id, query, self.embedding_model, k=k,
+            filter_files=filter_files, raise_errors=True,
+        )
         if not chunks:
             return "", []
 
