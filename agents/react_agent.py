@@ -167,6 +167,40 @@ def _parse_agent_response(content: str) -> dict:
     return json.loads(candidate)
 
 
+def _recover_native_tool_call(exc: Exception):
+    """
+    Some hosted models (e.g. Llama on Groq) emit their NATIVE tool-call tokens
+    when they see tool descriptions in the prompt. Since we declare no
+    API-side tools, the provider rejects the generation with a 400
+    'tool_use_failed' error whose body contains the intended call as
+    failed_generation: '{"name": ..., "arguments": {...}}'.
+    Convert that into our JSON protocol so the loop can continue.
+    """
+    s = str(exc)
+    if "tool_use_failed" not in s:
+        return None
+    m = re.search(r"['\"]failed_generation['\"]:\s*'(.+?)'\s*\}\s*\}?\s*$", s, re.DOTALL)
+    if not m:
+        m = re.search(r"['\"]failed_generation['\"]:\s*\"(.+?)\"\s*\}\s*\}?\s*$", s, re.DOTALL)
+    if not m:
+        return None
+    try:
+        call = json.loads(m.group(1))
+    except json.JSONDecodeError:
+        return None
+    name = call.get("name") or call.get("tool")
+    args = call.get("arguments") or call.get("args") or {}
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except json.JSONDecodeError:
+            args = {}
+    if not name:
+        return None
+    return {"thought": "(recovered from native tool-call output)",
+            "action": {"tool": name, "args": args}}
+
+
 # ── Agent loop ────────────────────────────────────────────────────────────────
 
 def agent_query_loop(
@@ -204,11 +238,19 @@ def agent_query_loop(
                 sources.append(s)
 
     for iteration in range(1, max_iterations + 1):
-        response = llm_invoke(messages)
-        content = getattr(response, "content", str(response))
+        try:
+            response = llm_invoke(messages)
+            content = getattr(response, "content", str(response))
+            recovered = None
+        except Exception as e:
+            recovered = _recover_native_tool_call(e)
+            if recovered is None:
+                raise
+            content = "```json\n" + json.dumps(recovered) + "\n```"
+            logger.info("[ReAct] recovered native tool call: %s", recovered["action"])
 
         try:
-            action_data = _parse_agent_response(content)
+            action_data = recovered or _parse_agent_response(content)
         except (ValueError, json.JSONDecodeError) as e:
             # One recovery attempt: remind the model of the protocol
             trace.append({"iteration": iteration, "error": f"unparseable response: {e}",
@@ -234,7 +276,7 @@ def agent_query_loop(
         if tool == "search_knowledge_base":
             observation, found = _tool_search_knowledge_base(
                 doc_manager, context_manager,
-                str(args.get("query", query)), args.get("k", 5))
+                str(args.get("query") or query), args.get("k", 5))
             _add_sources(found)
         elif tool == "get_document_pages":
             observation, found = _tool_get_document_pages(
@@ -264,7 +306,13 @@ def agent_query_loop(
                      "You have used all reasoning steps. Based ONLY on the observations above, "
                      "give your best final answer now, citing sources, or state what is missing. "
                      "Reply as plain text."})
-    response = llm_invoke(messages)
-    answer = getattr(response, "content", str(response))
+    try:
+        response = llm_invoke(messages)
+        answer = getattr(response, "content", str(response))
+    except Exception as e:
+        if _recover_native_tool_call(e) is None:
+            raise
+        answer = ("I could not finish reasoning within the step limit. "
+                  "Please try rephrasing your question.")
     trace.append({"iteration": max_iterations + 1, "final": True, "forced": True})
     return answer, trace, sources
