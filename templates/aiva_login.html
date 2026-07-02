@@ -13,7 +13,7 @@
   html, body { height: 100%; }
   body {
     font-family: 'Inter', system-ui, sans-serif;
-    background: #8f8a88;               /* warm grey page backdrop */
+    background: #D9D9D9;               /* light grey page backdrop */
     display: flex; align-items: center; justify-content: center;
     padding: 24px;
   }
@@ -24,9 +24,9 @@
     width: min(960px, 100%);
     box-shadow: 0 24px 60px rgba(0,0,0,.35);
   }
-  .card {                               /* dark navy inner card */
+  .card {                               /* dark navy inner card — matches the logo's background */
     position: relative;
-    background: #070d17;
+    background: #020d16;
     border-radius: 44px;
     padding: 48px 56px 44px;
     overflow: hidden;
@@ -38,7 +38,7 @@
     display: flex; align-items: center; justify-content: center;
     pointer-events: none;
   }
-  .ribbon svg { width: 62%; max-width: 460px; opacity: .95; }
+  .ribbon img { width: 78%; max-width: 560px; opacity: .95; }
   .content { position: relative; z-index: 1; }
 
   h1 {
@@ -117,7 +117,7 @@
     .card { border-radius: 26px; padding: 34px 22px; }
     .fields { gap: 22px; }
     form { margin-top: 36px; }
-    .ribbon svg { width: 90%; }
+    .ribbon img { width: 95%; }
   }
 </style>
 </head>
@@ -125,26 +125,7 @@
   <div class="frame">
     <div class="card">
       <div class="ribbon" aria-hidden="true">
-        <!-- Abstract AIVA ribbon mark: three gradient swooshes -->
-        <svg viewBox="0 0 400 400" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <linearGradient id="gTeal" x1="120" y1="330" x2="330" y2="120" gradientUnits="userSpaceOnUse">
-              <stop offset="0" stop-color="#19b8d8"/><stop offset="1" stop-color="#27e6a7"/>
-            </linearGradient>
-            <linearGradient id="gGreen" x1="220" y1="40" x2="300" y2="230" gradientUnits="userSpaceOnUse">
-              <stop offset="0" stop-color="#2fe08c"/><stop offset="1" stop-color="#1fc9c4"/>
-            </linearGradient>
-            <linearGradient id="gPurple" x1="90" y1="340" x2="200" y2="170" gradientUnits="userSpaceOnUse">
-              <stop offset="0" stop-color="#7a3cf0"/><stop offset="1" stop-color="#2f8fe6"/>
-            </linearGradient>
-          </defs>
-          <!-- top arm: tall green ribbon curving down into the centre -->
-          <path d="M214 30 C258 74 268 136 240 192 C228 216 208 234 182 246 L162 210 C186 196 202 178 210 154 C220 122 208 84 180 56 C190 44 202 35 214 30 Z" fill="url(#gGreen)"/>
-          <!-- right arm: wide cyan swoosh sweeping to a tip at bottom right -->
-          <path d="M170 240 C216 206 276 202 322 232 C352 252 372 284 380 322 L336 344 C326 308 306 282 274 268 C240 254 206 258 180 278 Z" fill="url(#gTeal)"/>
-          <!-- left arm: purple-blue tail flowing down to bottom left -->
-          <path d="M196 236 C158 248 128 272 110 308 C98 332 92 356 94 382 L140 370 C138 344 144 318 160 298 C174 280 192 268 214 262 Z" fill="url(#gPurple)"/>
-        </svg>
+        <img src="{{ url_for('static', filename='aiva-logo.png') }}" alt=""/>
       </div>
 
       <div class="content">
