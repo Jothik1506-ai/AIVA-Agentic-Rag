@@ -208,11 +208,19 @@ def start_system_init():
         current_pid = os.getpid()
         if _init_pid != current_pid:
             _init_pid = current_pid
+            print(f"[init] starting system-init thread in pid {current_pid}", flush=True)
             _init_thread = _threading.Thread(target=initialize_system, daemon=True, name="system-init")
             _init_thread.start()
     return _init_thread
 
-start_system_init()
+# IMPORTANT: do NOT call start_system_init() at import time.
+# Gunicorn's master imports this module before forking workers; a background
+# thread started here runs in the MASTER, and forking while that thread holds
+# import/SSL/threading locks deadlocks the worker's own init thread — the
+# worker (the only process that serves requests) then reports "initializing"
+# forever. Init is started per-worker via gunicorn.conf.py post_fork, with
+# the before_request guard as a backup, and explicitly in __main__ for
+# direct `python app.py` runs.
 
 @app.before_request
 def ensure_initialized_in_worker():
@@ -237,7 +245,9 @@ if __name__ == '__main__':
     print(f"📂 EMBEDDINGS_DIR = {embeddings_dir.resolve()}")
 
     print("📄 System initializing in background thread...")
-    _init_thread.join(timeout=2)  # give it a moment to start
+    init_thread = start_system_init()
+    if init_thread is not None:
+        init_thread.join(timeout=2)  # give it a moment to start
 
     try:
         app.run(host='0.0.0.0', port=9072, debug=False, use_reloader=False, threaded=True)
