@@ -41,9 +41,15 @@ app.config['SESSION_FILE_THRESHOLD'] = 100
 os.makedirs(app.config['SESSION_FILE_DIR'], exist_ok=True)
 # Secure cookie flags
 app.config['SESSION_COOKIE_HTTPONLY'] = True
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-# Set SECURE only in production (HTTPS=true env var); default off for local dev
-app.config['SESSION_COOKIE_SECURE'] = os.environ.get('HTTPS', 'false').lower() == 'true'
+# On Render (HTTPS, called cross-origin by the Freelancia frontend) the session
+# cookie must be SameSite=None; Secure so browsers send it with
+# fetch(..., credentials: 'include'). Locally keep Lax over plain HTTP.
+if os.environ.get('RENDER') or os.environ.get('HTTPS', 'false').lower() == 'true':
+    app.config['SESSION_COOKIE_SAMESITE'] = 'None'
+    app.config['SESSION_COOKIE_SECURE'] = True
+else:
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+    app.config['SESSION_COOKIE_SECURE'] = False
 
 # -------------------------------------------------------
 # Public Embedding Asset Route (no auth)

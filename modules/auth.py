@@ -14,6 +14,7 @@ import threading
 from pathlib import Path
 from functools import wraps
 from flask import session, redirect, url_for, jsonify, request, g
+from werkzeug.security import generate_password_hash, check_password_hash
 
 import requests
 
@@ -99,7 +100,13 @@ def get_current_user_id() -> str:
         if token.count(".") == 2:
             user_id = _verify_google_id_token(token)
 
-    # 2. Trusted frontend header (unverified — see module docstring)
+    # 2. Logged-in session (login page: local account or Google Sign-In)
+    if not user_id:
+        sess_uid = session.get("aiva_user_id")
+        if sess_uid:
+            user_id = sess_uid
+
+    # 3. Trusted frontend header (unverified — see module docstring)
     if not user_id and os.environ.get("AIVA_TRUST_USER_HEADER", "1") != "0":
         hdr = request.headers.get("X-User-Id", "").strip()
         if hdr and len(hdr) <= 128:
@@ -107,7 +114,7 @@ def get_current_user_id() -> str:
             if safe:
                 user_id = f"hdr:{safe}"
 
-    # 3. Per-browser-session fallback
+    # 4. Per-browser-session fallback
     if not user_id:
         if not session.get("aiva_uid"):
             session["aiva_uid"] = uuid.uuid4().hex
@@ -116,6 +123,96 @@ def get_current_user_id() -> str:
 
     g.user_id = user_id
     return user_id
+
+
+# ── Local user accounts (username + password) ────────────────────────────────
+# Backs the AIVA login page. Accounts live in users.json with salted password
+# hashes (werkzeug pbkdf2). A logged-in user gets user id "local:<username>".
+
+_USERS_FILE = current_dir / "users.json"
+_users_lock = threading.Lock()
+
+_USERNAME_MIN, _USERNAME_MAX = 3, 32
+_PASSWORD_MIN = 6
+
+
+def _load_users() -> dict:
+    if not _USERS_FILE.exists():
+        return {}
+    try:
+        import json
+        with open(_USERS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error("Failed to load users.json: %s", e)
+        return {}
+
+
+def _save_users(users: dict) -> None:
+    import json
+    with open(_USERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(users, f, indent=2)
+
+
+def _normalize_username(username: str) -> str:
+    return (username or "").strip().lower()
+
+
+def validate_new_credentials(username: str, password: str):
+    """Return an error message, or None if the credentials are acceptable."""
+    username = _normalize_username(username)
+    if not (_USERNAME_MIN <= len(username) <= _USERNAME_MAX):
+        return f"Username must be {_USERNAME_MIN}-{_USERNAME_MAX} characters."
+    if not all(c.isalnum() or c in "._-@" for c in username):
+        return "Username may only contain letters, digits and . _ - @"
+    if len(password or "") < _PASSWORD_MIN:
+        return f"Password must be at least {_PASSWORD_MIN} characters."
+    return None
+
+
+def create_local_user(username: str, password: str):
+    """Create an account. Returns (user_id, None) or (None, error_message)."""
+    err = validate_new_credentials(username, password)
+    if err:
+        return None, err
+    username = _normalize_username(username)
+    with _users_lock:
+        users = _load_users()
+        if username in users:
+            return None, "That username is already taken."
+        users[username] = {
+            "password_hash": generate_password_hash(password),
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        }
+        _save_users(users)
+    logger.info("Local account created: %s", username)
+    return f"local:{username}", None
+
+
+def verify_local_user(username: str, password: str):
+    """Check credentials. Returns user_id or None."""
+    username = _normalize_username(username)
+    with _users_lock:
+        users = _load_users()
+    record = users.get(username)
+    if not record:
+        return None
+    if not check_password_hash(record.get("password_hash", ""), password or ""):
+        return None
+    return f"local:{username}"
+
+
+def login_session_user(user_id: str) -> None:
+    """Persist a verified identity into the Flask session."""
+    session["aiva_user_id"] = user_id
+    session.permanent = True
+
+
+def google_login_from_credential(credential: str):
+    """Verify a Google Sign-In credential (ID token). Returns user_id or None."""
+    if not credential or credential.count(".") != 2:
+        return None
+    return _verify_google_id_token(credential)
 
 
 def load_access_data():
